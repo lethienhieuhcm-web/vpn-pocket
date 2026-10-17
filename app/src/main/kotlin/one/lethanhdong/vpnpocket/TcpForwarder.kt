@@ -276,39 +276,7 @@ class TcpForwarder(
         return buf.array()
     }
 
-    companion object Net {
-        fun checksum(data: ByteArray): Int {
-            var sum = 0L
-            var i = 0
-            while (i + 1 < data.size) {
-                sum += ((data[i].toInt() and 0xFF) shl 8) or (data[i + 1].toInt() and 0xFF)
-                i += 2
-            }
-            if (i < data.size) sum += (data[i].toInt() and 0xFF) shl 8
-            while (sum shr 16 != 0L) sum = (sum and 0xFFFF) + (sum shr 16)
-            return sum.inv().toInt() and 0xFFFF
-        }
-
-        fun tcpChecksumV4(srcIp: ByteArray, dstIp: ByteArray, tcp: ByteArray): Int {
-            val pseudo = ByteBuffer.allocate(12 + tcp.size).order(ByteOrder.BIG_ENDIAN)
-            pseudo.put(srcIp); pseudo.put(dstIp)
-            pseudo.put(0); pseudo.put(TCP_PROTOCOL.toByte())
-            pseudo.putShort(tcp.size.toShort())
-            pseudo.put(tcp)
-            return checksum(pseudo.array())
-        }
-
-        fun tcpChecksumV6(srcIp: ByteArray, dstIp: ByteArray, tcp: ByteArray): Int {
-            val pseudo = ByteBuffer.allocate(40 + tcp.size).order(ByteOrder.BIG_ENDIAN)
-            pseudo.put(srcIp); pseudo.put(dstIp)
-            pseudo.putInt(tcp.size)
-            pseudo.putInt(TCP_PROTOCOL)
-            pseudo.put(tcp)
-            return checksum(pseudo.array())
-        }
-
-        fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
-    }
+    // ---- Packet building (tiếp) ----
 
     /**
      * Một kết nối TCP: state machine + pump data 2 chiều.
@@ -321,7 +289,7 @@ class TcpForwarder(
         private val isV6: Boolean,
         private val writer: (ByteArray) -> Unit
     ) {
-        @Volatile private var state = State.CONNECTING
+        @Volatile private var state = TcpState.CONNECTING
         // seq app gửi tới (đã trừ SYN).
         @Volatile private var appSeq: Long = 0
         // seq của mình gửi tới app.
@@ -330,18 +298,17 @@ class TcpForwarder(
         private var pumpThread: Thread? = null
         private val closed = AtomicBoolean(false)
 
-        private enum class State { CONNECTING, ESTABLISHED, APP_FIN, CLOSED }
-
         /** Gọi khi nhận SYN: dial tunnel ở thread riêng, xong thì SYN-ACK. */
         fun startConnect(tunnel: vpntunnel.Tunnel, appIsn: Long, onDone: () -> Unit) {
             appSeq = (appIsn + 1) and 0xFFFFFFFFL
             Thread({
+                var host = ipStr(dstIp)
                 try {
-                    val host = InetAddress.getByAddress(dstIp).hostAddress ?: return@Thread
+                    host = InetAddress.getByAddress(dstIp).hostAddress ?: return@Thread
                     val c = tunnel.dialTCP(host, dstPort.toLong())
                     if (closed.get()) { c.close(); return@Thread }
                     tunnelConn = c
-                    state = State.ESTABLISHED
+                    state = TcpState.ESTABLISHED
                     // SYN-ACK (kèm MSS clamp).
                     sendTcp(srcIp, dstIp, srcPort, dstPort,
                         seq = ourSeq, ack = appSeq,
@@ -361,7 +328,7 @@ class TcpForwarder(
 
         /** Nhận packet từ app cho connection đã có. */
         fun onPacket(seq: Long, ack: Long, data: ByteArray, isAck: Boolean, isFin: Boolean, isRst: Boolean) {
-            if (state == State.CLOSED || state == State.CONNECTING) return
+            if (state == TcpState.CLOSED || state == TcpState.CONNECTING) return
             if (isRst) { close(); return }
             val c = tunnelConn ?: return
             // Data: chỉ nhận đúng seq kỳ vọng (đơn giản, app sẽ retransmit).
@@ -390,7 +357,7 @@ class TcpForwarder(
                     seq = ourSeq, ack = (seq + 1) and 0xFFFFFFFFL,
                     fin = true, ackFlag = true, isV6 = isV6)
                 ourSeq = (ourSeq + 1) and 0xFFFFFFFFL
-                state = State.APP_FIN
+                state = TcpState.APP_FIN
                 close()
             }
         }
@@ -432,10 +399,48 @@ class TcpForwarder(
 
         fun close() {
             if (!closed.compareAndSet(false, true)) return
-            state = State.CLOSED
+            state = TcpState.CLOSED
             pumpThread?.interrupt()
             try { tunnelConn?.close() } catch (_: Exception) {}
             tunnelConn = null
         }
     }
 }
+
+// ---- Top-level helpers (không để trong companion object thứ 2 — Kotlin cấm) ----
+
+private const val TCP_PROTO = 6
+
+private fun checksum(data: ByteArray): Int {
+    var sum = 0L
+    var i = 0
+    while (i + 1 < data.size) {
+        sum += ((data[i].toInt() and 0xFF) shl 8) or (data[i + 1].toInt() and 0xFF)
+        i += 2
+    }
+    if (i < data.size) sum += (data[i].toInt() and 0xFF) shl 8
+    while (sum shr 16 != 0L) sum = (sum and 0xFFFF) + (sum shr 16)
+    return sum.inv().toInt() and 0xFFFF
+}
+
+private fun tcpChecksumV4(srcIp: ByteArray, dstIp: ByteArray, tcp: ByteArray): Int {
+    val pseudo = ByteBuffer.allocate(12 + tcp.size).order(ByteOrder.BIG_ENDIAN)
+    pseudo.put(srcIp); pseudo.put(dstIp)
+    pseudo.put(0); pseudo.put(TCP_PROTO.toByte())
+    pseudo.putShort(tcp.size.toShort())
+    pseudo.put(tcp)
+    return checksum(pseudo.array())
+}
+
+private fun tcpChecksumV6(srcIp: ByteArray, dstIp: ByteArray, tcp: ByteArray): Int {
+    val pseudo = ByteBuffer.allocate(40 + tcp.size).order(ByteOrder.BIG_ENDIAN)
+    pseudo.put(srcIp); pseudo.put(dstIp)
+    pseudo.putInt(tcp.size)
+    pseudo.putInt(TCP_PROTO)
+    pseudo.put(tcp)
+    return checksum(pseudo.array())
+}
+
+private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
+
+private enum class TcpState { CONNECTING, ESTABLISHED, APP_FIN, CLOSED }
