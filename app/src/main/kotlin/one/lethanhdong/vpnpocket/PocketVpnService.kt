@@ -41,6 +41,7 @@ class PocketVpnService : VpnService() {
     private var tunFd: ParcelFileDescriptor? = null
     private val running = AtomicBoolean(false)
     private var tunnelManager: TunnelManager? = null
+    private var forwarder: TcpForwarder? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -109,16 +110,20 @@ class PocketVpnService : VpnService() {
     }
 
     /**
-     * Seam cho P2.3: packet forwarder sẽ đọc/ghi fd ở đây.
-     * P2.1 chỉ giữ TUN mở.
+     * Seam cho P2.3: packet forwarder đọc/ghi fd ở đây.
      */
     private fun onTunnelReady(fd: ParcelFileDescriptor) {
-        // TODO P2.3: TcpForwarder(fd).start()
+        val tm = tunnelManager ?: return
+        forwarder = TcpForwarder(fd, tm, onUdp = { pkt ->
+            // TODO P2.4: DNS (UDP/53) → DoH; P2.5: UDP khác → drop + toast.
+            Log.d(TAG, "UDP packet dropped (${pkt.size} bytes), TODO P2.4/P2.5")
+        }).apply { start() }
     }
 
     private fun stopTunnel() {
         if (!running.compareAndSet(true, false)) return
-        // TODO P2.3: forwarder.stop()
+        forwarder?.stop()
+        forwarder = null
         tunnelManager?.disconnect()
         tunnelManager = null
         try {
