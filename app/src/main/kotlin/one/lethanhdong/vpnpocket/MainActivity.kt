@@ -96,6 +96,18 @@ class MainActivity : Activity() {
         connected = true
         connectBtn.text = "Ngắt kết nối"
         statusView.text = "VPN Pocket — đang kết nối…"
+        // P2.6: hiện IP egress (fetch qua chính tunnel).
+        EgressIp.fetch { ip ->
+            runOnUiThread {
+                if (connected) {
+                    statusView.text = if (ip != null) {
+                        "VPN Pocket — đã kết nối\nIP: $ip"
+                    } else {
+                        "VPN Pocket — đã kết nối"
+                    }
+                }
+            }
+        }
     }
 
     private fun requestNotificationPermission() {
