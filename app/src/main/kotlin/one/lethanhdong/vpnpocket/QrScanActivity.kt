@@ -119,8 +119,8 @@ class QrScanActivity : AppCompatActivity() {
 
     private fun onQrScanned(text: String) {
         runOnUiThread {
-            // Validate sơ: phải là tailcat address (bắt đầu bằng "tcp").
-            if (!text.startsWith("tcp")) {
+            // Validate: phải là tailcat serve address (khớp regex của qr_serve.py).
+            if (!text.matches(Regex("tcp[A-Za-z0-9_.\\-]+"))) {
                 Toast.makeText(this, "Mã không đúng (cần mã QR serve address)", Toast.LENGTH_LONG).show()
                 scanned = false
                 return@runOnUiThread

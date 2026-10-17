@@ -16,8 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * P2.1: VpnService + TUN (IPv4+IPv6, MTU 1400).
- * P2.3 sẽ gắn packet forwarder vào [onTunnelReady].
+ * VpnService + TUN (IPv4+IPv6, MTU 1400) + TCP forwarder + DNS DoH + watchdog.
  *
  * Pattern học từ mổ ProtonVPN (~/workspace/your_files/protonvpn.md):
  * - setUnderlyingNetworks(null), setMetered(false) (API 29+)
@@ -49,11 +48,24 @@ class PocketVpnService : VpnService() {
     private val mainHandler = Handler(Looper.getMainLooper())
     // Chống spam toast: tối đa 1 lần / 60s.
     private val lastUdpToastAt = AtomicLong(0)
-    // P2.6 watchdog: quét /proc mỗi 30s để protect DERP socket mới (reconnect).
+    // P2.6 watchdog: mỗi 30s protect DERP socket mới (reconnect) + tự nối lại nếu rớt.
     private val watchdog = object : Runnable {
         override fun run() {
-            val n = tunnelManager?.protectScan() ?: 0
-            if (n > 0) Log.i(TAG, "watchdog: protected $n new socket(s)")
+            val tm = tunnelManager
+            if (tm != null) {
+                // Tự reconnect nếu tunnel chưa lên (vd lần đầu fail do mất mạng).
+                if (tm.getTunnel() == null && tm.hasServeAddr()) {
+                    try {
+                        tm.connect()
+                        updateNotification("Đã kết nối")
+                        Log.i(TAG, "watchdog: reconnected")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "watchdog reconnect failed: ${e.message}")
+                    }
+                }
+                val n = tm.protectScan()
+                if (n > 0) Log.i(TAG, "watchdog: protected $n new socket(s)")
+            }
             mainHandler.postDelayed(this, 30_000)
         }
     }
