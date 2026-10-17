@@ -5,6 +5,7 @@ import android.net.VpnService
 import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import vpntunnel.Protector
 import vpntunnel.Vpntunnel
 
 /**
@@ -38,9 +39,12 @@ class TunnelManager(
         )
     }
 
+    // @Volatile: đọc/ghi từ service thread (connect/disconnect)
+    // và watchdog thread (protectScan, P2.6).
+    @Volatile
     private var tunnel: vpntunnel.Tunnel? = null
 
-    private val protector = object : Vpntunnel.Protector {
+    private val protector = object : Protector {
         override fun protect(fd: Long): Boolean {
             val ok = vpnService.protect(fd.toInt())
             if (!ok) Log.w(TAG, "protect($fd) failed")
