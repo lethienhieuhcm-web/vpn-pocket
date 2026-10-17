@@ -6,7 +6,9 @@ plugins {
 
 android {
     namespace = "one.lethanhdong.vpnpocket"
-    compileSdk = 34
+    // compileSdk 36: androidx.core 1.18.0 bắt buộc compile API 36+ (AAR metadata check).
+    // targetSdk giữ 34 theo spec (quyết định runtime behavior, không liên quan lỗi build).
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "one.lethanhdong.vpnpocket"
