@@ -40,6 +40,7 @@ class PocketVpnService : VpnService() {
 
     private var tunFd: ParcelFileDescriptor? = null
     private val running = AtomicBoolean(false)
+    private var tunnelManager: TunnelManager? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -87,7 +88,21 @@ class PocketVpnService : VpnService() {
             return false
         }
         tunFd = fd
-        updateNotification("Đã kết nối")
+        // P2.2: nối tunnel nếu đã có serve address (QR scan ở P2.6).
+        val tm = TunnelManager(this, this)
+        tunnelManager = tm
+        if (tm.hasServeAddr()) {
+            try {
+                tm.connect()
+                updateNotification("Đã kết nối")
+            } catch (e: Exception) {
+                Log.e(TAG, "tunnel connect failed: ${e.message}")
+                updateNotification("Lỗi kết nối: ${e.message}")
+                // Vẫn giữ TUN mở để user thấy trạng thái; forwarder (P2.3) sẽ retry.
+            }
+        } else {
+            updateNotification("Chưa quét mã QR")
+        }
         Log.i(TAG, "TUN established (mtu=$MTU)")
         onTunnelReady(fd)
         return true
@@ -104,6 +119,8 @@ class PocketVpnService : VpnService() {
     private fun stopTunnel() {
         if (!running.compareAndSet(true, false)) return
         // TODO P2.3: forwarder.stop()
+        tunnelManager?.disconnect()
+        tunnelManager = null
         try {
             tunFd?.close()
         } catch (e: Exception) {

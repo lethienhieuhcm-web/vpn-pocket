@@ -36,5 +36,6 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.lifecycle.runtime)
     implementation(libs.security.crypto)
-    // P2: implementation(files("libs/vpntunnel.aar")) — CI build AAR từ vpntunnel/ rồi copy vào app/libs
+    // vpntunnel.aar: CI build từ vpntunnel/ (gomobile bind) rồi copy vào app/libs.
+    implementation(files("libs/vpntunnel.aar"))
 }
