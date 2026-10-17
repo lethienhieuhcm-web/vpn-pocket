@@ -226,10 +226,21 @@ class MainActivity : Activity() {
         })
         connected = true
         setUiState(UiState.CONNECTING)
-        // Hiện IP egress khi tunnel lên.
+        // Hiện IP egress khi tunnel lên. Nếu fetch thất bại (tunnel không truyền
+        // được dữ liệu) thì báo lỗi thay vì hiện "Đã kết nối" gây hiểu lầm.
         EgressIp.fetch { ip ->
             runOnUiThread {
-                if (connected) setUiState(UiState.CONNECTED, ip)
+                if (!connected) return@runOnUiThread
+                if (ip != null) {
+                    setUiState(UiState.CONNECTED, ip)
+                } else {
+                    connected = false
+                    setUiState(UiState.IDLE)
+                    statusText.text = "Không kết nối được — thử lại"
+                    startService(Intent(this, PocketVpnService::class.java).apply {
+                        action = PocketVpnService.ACTION_DISCONNECT
+                    })
+                }
             }
         }
     }

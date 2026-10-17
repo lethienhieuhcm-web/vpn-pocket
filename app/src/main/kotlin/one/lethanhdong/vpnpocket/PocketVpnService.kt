@@ -110,27 +110,33 @@ class PocketVpnService : VpnService() {
 
     private fun startTunnel(): Boolean {
         startForeground(NOTIF_ID, buildNotification("Đang kết nối…"))
+        // THỨ TỰ BẮT BUỘC: connect tunnel TRƯỚC khi establish() TUN.
+        // Socket DERP tạo trong Ping() phải đi đường mạng thường. Nếu establish()
+        // trước, packet DERP lọt vào TUN (chưa có forwarder) → blackhole → Ping timeout.
+        // protect() gọi trong Connect() vẫn hiệu lực sau khi TUN lên.
+        val tm = TunnelManager(this, this)
+        tunnelManager = tm
+        if (!tm.hasServeAddr()) {
+            Log.e(TAG, "no serve address")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            return false
+        }
+        try {
+            tm.connect()
+        } catch (e: Exception) {
+            Log.e(TAG, "tunnel connect failed: ${e.message}")
+            updateNotification("Không kết nối được: ${e.message}")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            return false
+        }
         val fd = buildTun() ?: run {
             Log.e(TAG, "establish() failed")
+            tm.disconnect()
             stopForeground(STOP_FOREGROUND_REMOVE)
             return false
         }
         tunFd = fd
-        // P2.2: nối tunnel nếu đã có serve address (QR scan ở P2.6).
-        val tm = TunnelManager(this, this)
-        tunnelManager = tm
-        if (tm.hasServeAddr()) {
-            try {
-                tm.connect()
-                updateNotification("Đã kết nối")
-            } catch (e: Exception) {
-                Log.e(TAG, "tunnel connect failed: ${e.message}")
-                updateNotification("Lỗi kết nối: ${e.message}")
-                // Vẫn giữ TUN mở để user thấy trạng thái; forwarder (P2.3) sẽ retry.
-            }
-        } else {
-            updateNotification("Chưa quét mã QR")
-        }
+        updateNotification("Đã kết nối")
         Log.i(TAG, "TUN established (mtu=$MTU)")
         onTunnelReady(fd)
         return true
