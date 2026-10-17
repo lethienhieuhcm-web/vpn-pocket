@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Hệ theme duy nhất của app.
+         Học từ mổ ProtonVPN 5.20.74.0 (verify từ styles.xml decompile):
+         ProtonTheme.Vpn.Mobile → ProtonTheme → ProtonThemeBase
+           → Theme.MaterialComponents.DayNight.NoActionBar.
+         Mọi Activity đều dùng theme họ ProtonTheme — không màn nào dùng theme lẻ.
+         Quy tắc: theme và lớp Activity phải tương thích —
+         theme platform chỉ dùng với Activity/ComponentActivity,
+         TUYỆT ĐỐI không dùng AppCompatActivity với theme platform
+         (crash IllegalStateException khi mở màn hình — đã gặp 2026-10-17). -->
+    <style name="Theme.VpnPocket" parent="@android:style/Theme.Material.NoActionBar">
+    </style>
+</resources>

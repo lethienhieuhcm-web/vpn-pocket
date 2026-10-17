@@ -10,7 +10,7 @@
 
     <application
         android:label="VPN Pocket"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:theme="@style/Theme.VpnPocket">
         <activity
             android:name=".MainActivity"
             android:exported="true">
