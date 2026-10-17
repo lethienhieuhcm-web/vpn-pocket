@@ -1,0 +1,21 @@
+# gradle/libs.versions.toml — VPN Pocket
+# Version mirror từ DAC Pocket (đã verify trên CI): AGP 9.1.0, Kotlin 2.2.10, JDK 21.
+[versions]
+agp = "9.1.0"
+kotlin = "2.2.10"
+core-ktx = "1.18.0"
+appcompat = "1.7.1"
+coroutines = "1.10.2"
+lifecycle = "2.9.2"
+security-crypto = "1.1.0"
+
+[libraries]
+core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "core-ktx" }
+appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+lifecycle-runtime = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
+security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "security-crypto" }
+
+[plugins]
+agp = { id = "com.android.application", version.ref = "agp" }
+kotlin = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
