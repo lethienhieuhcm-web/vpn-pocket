@@ -11,8 +11,8 @@ import android.util.Log
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.Toast
+import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -33,7 +33,7 @@ import java.util.concurrent.Executors
  * QR chứa chuỗi tailcat address (từ qr_serve.py trên VM).
  * Quét xong → lưu EncryptedSharedPreferences → đóng.
  */
-class QrScanActivity : AppCompatActivity() {
+class QrScanActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "PocketVpn"
