@@ -54,7 +54,8 @@ jobs:
       # the check even with the tool directive in go.mod.
       - name: Build AAR (arm64)
         working-directory: vpntunnel
-        run: gomobile bind -target=android/arm64 -o ../vpntunnel.aar .
+        # -androidapi 26: gomobile defaults to API 16 but NDK r29 only supports 21..35.
+        run: gomobile bind -target=android/arm64 -androidapi 26 -o ../vpntunnel.aar .
 
       - name: Upload AAR
         uses: actions/upload-artifact@v4
