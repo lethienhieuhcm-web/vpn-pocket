@@ -19,7 +19,7 @@ import vpntunnel.Vpntunnel
  */
 class TunnelManager(
     private val context: Context,
-    private val vpnService: VpnService
+    private val vpnService: VpnService?
 ) {
     companion object {
         private const val TAG = "PocketVpn"
@@ -46,7 +46,7 @@ class TunnelManager(
 
     private val protector = object : Protector {
         override fun protect(fd: Long): Boolean {
-            val ok = vpnService.protect(fd.toInt())
+            val ok = vpnService?.protect(fd.toInt()) ?: false
             if (!ok) Log.w(TAG, "protect($fd) failed")
             return ok
         }

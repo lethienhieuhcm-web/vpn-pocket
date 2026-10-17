@@ -49,6 +49,14 @@ class PocketVpnService : VpnService() {
     private val mainHandler = Handler(Looper.getMainLooper())
     // Chống spam toast: tối đa 1 lần / 60s.
     private val lastUdpToastAt = AtomicLong(0)
+    // P2.6 watchdog: quét /proc mỗi 30s để protect DERP socket mới (reconnect).
+    private val watchdog = object : Runnable {
+        override fun run() {
+            val n = tunnelManager?.protectScan() ?: 0
+            if (n > 0) Log.i(TAG, "watchdog: protected $n new socket(s)")
+            mainHandler.postDelayed(this, 30_000)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -129,6 +137,8 @@ class PocketVpnService : VpnService() {
                 notifyUdpDropped()
             }
         }).apply { start() }
+        // P2.6: watchdog protect DERP socket mới.
+        mainHandler.postDelayed(watchdog, 30_000)
     }
 
     /**
@@ -150,6 +160,7 @@ class PocketVpnService : VpnService() {
 
     private fun stopTunnel() {
         if (!running.compareAndSet(true, false)) return
+        mainHandler.removeCallbacks(watchdog)
         forwarder?.stop()
         forwarder = null
         tunnelManager?.disconnect()

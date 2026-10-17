@@ -36,6 +36,11 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.lifecycle.runtime)
     implementation(libs.security.crypto)
+    // P2.6: QR scan (CameraX + ZXing).
+    implementation(libs.camera.camera2)
+    implementation(libs.camera.lifecycle)
+    implementation(libs.camera.view)
+    implementation(libs.zxing.core)
     // vpntunnel.aar: CI build từ vpntunnel/ (gomobile bind) rồi copy vào app/libs.
     implementation(files("libs/vpntunnel.aar"))
 }
