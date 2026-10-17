@@ -2,10 +2,16 @@ package one.lethanhdong.vpnpocket
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.ImageDecoder
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.util.Log
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -18,11 +24,12 @@ import androidx.core.content.ContextCompat
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.MultiFormatReader
 import com.google.zxing.PlanarYUVLuminanceSource
+import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.common.HybridBinarizer
 import java.util.concurrent.Executors
 
 /**
- * P2.6: quét QR serve address (CameraX + ZXing).
+ * P2.6: quét QR serve address (CameraX + ZXing), hoặc chọn ảnh QR từ máy.
  * QR chứa chuỗi tailcat address (từ qr_serve.py trên VM).
  * Quét xong → lưu EncryptedSharedPreferences → đóng.
  */
@@ -38,6 +45,12 @@ class QrScanActivity : AppCompatActivity() {
     private val reader = MultiFormatReader()
     private var scanned = false
 
+    // Chọn ảnh QR từ thư viện (cho máy chỉ có 1 điện thoại, khỏi cần màn hình thứ 2).
+    private val pickImage =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+            uri?.let { decodeFromGallery(it) }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         previewView = PreviewView(this).apply {
@@ -46,7 +59,20 @@ class QrScanActivity : AppCompatActivity() {
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
         }
-        setContentView(FrameLayout(this).apply { addView(previewView) })
+        val galleryBtn = Button(this).apply {
+            text = "Chọn ảnh mã QR từ máy"
+            setOnClickListener { pickImage.launch("image/*") }
+        }
+        setContentView(FrameLayout(this).apply {
+            addView(previewView)
+            addView(galleryBtn, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL
+                bottomMargin = 64
+            })
+        })
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             == PackageManager.PERMISSION_GRANTED
@@ -117,8 +143,44 @@ class QrScanActivity : AppCompatActivity() {
         }
     }
 
-    private fun onQrScanned(text: String) {
-        runOnUiThread {
+    /**
+     * Giải mã QR từ ảnh trong thư viện (chạy background thread).
+     */
+    private fun decodeFromGallery(uri: Uri) {
+        Thread {
+            try {
+                val bitmap = if (Build.VERSION.SDK_INT >= 28) {
+                    ImageDecoder.decodeBitmap(
+                        ImageDecoder.createSource(contentResolver, uri)
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    MediaStore.Images.Media.getBitmap(contentResolver, uri)
+                }
+                val w = bitmap.width
+                val h = bitmap.height
+                val pixels = IntArray(w * h)
+                bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+                val result = reader.decode(
+                    BinaryBitmap(HybridBinarizer(RGBLuminanceSource(w, h, pixels)))
+                )
+                val text = result.text?.trim().orEmpty()
+                if (text.isNotEmpty()) {
+                    scanned = true
+                    onQrScanned(text)
+                } else {
+                    throw IllegalArgumentException("empty")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "gallery decode: ${e.message}")
+                runOnUiThread {
+                    Toast.makeText(this, "Không đọc được mã từ ảnh này", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun onQrScanned(text: String) {        runOnUiThread {
             // Validate: phải là tailcat serve address (khớp regex của qr_serve.py).
             if (!text.matches(Regex("tcp[A-Za-z0-9_.\\-]+"))) {
                 Toast.makeText(this, "Mã không đúng (cần mã QR serve address)", Toast.LENGTH_LONG).show()
