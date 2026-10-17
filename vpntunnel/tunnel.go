@@ -93,18 +93,31 @@ func NewTunnel(serveAddr, keyStr string, p Protector) (*Tunnel, error) {
 
 // Connect starts the tunnel (DERP connection + server handshake) and
 // protects the DERP sockets so their packets bypass the VPN interface.
+//
+// The network handshake runs WITHOUT holding the mutex, so a concurrent
+// ProtectScan from the 30s watchdog is not blocked for the whole dial
+// timeout (fix 2026-10-17: Connect held the lock across Ping).
 func (t *Tunnel) Connect() error {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	if t.closed {
+		t.mu.Unlock()
 		return errors.New("vpntunnel: tunnel closed")
 	}
+	client := t.client // set once in NewTunnel, never reassigned
+	t.mu.Unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
 	defer cancel()
 	// Ping starts the client if needed and performs the meow handshake
 	// with the server through DERP. Its internal timeout is 10s.
-	if _, err := t.client.Ping(ctx); err != nil {
+	if _, err := client.Ping(ctx); err != nil {
 		return fmt.Errorf("vpntunnel: connect: %w", err)
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed {
+		return errors.New("vpntunnel: tunnel closed")
 	}
 	t.protectScanLocked()
 	return nil
@@ -284,6 +297,36 @@ func (c *Conn) Close() error {
 	return c.conn.Close()
 }
 
+// parseDerpInodes extracts inodes of ESTABLISHED sockets whose remote port is
+// 443 (DERP is HTTPS) from /proc/net/tcp{,6} content.
+//
+// Split out for unit testing: the /proc format is fragile (field indices,
+// hex port, state codes) and this is the easiest part to get wrong.
+func parseDerpInodes(data string) map[int64]bool {
+	inodes := map[int64]bool{}
+	for _, line := range strings.Split(data, "\n") {
+		f := strings.Fields(line)
+		// sl local_address rem_address st ... inode
+		if len(f) < 10 || f[0] == "sl" {
+			continue
+		}
+		rem, st := f[2], f[3]
+		if st != "01" { // ESTABLISHED (01; 0A = LISTEN — đừng nhầm!)
+			continue
+		}
+		parts := strings.Split(rem, ":")
+		if len(parts) != 2 || parts[1] != derpPort {
+			continue
+		}
+		inode, err := strconv.ParseInt(f[9], 10, 64)
+		if err != nil {
+			continue
+		}
+		inodes[inode] = true
+	}
+	return inodes
+}
+
 // derpSocket is an ESTABLISHED socket to remote port 443 owned by this process.
 type derpSocket struct {
 	fd    int
@@ -292,6 +335,13 @@ type derpSocket struct {
 
 // scanDerpSockets finds ESTABLISHED TCP sockets to remote port 443
 // (DERP is HTTPS) in /proc/self/net/tcp{,6} and maps them to fds.
+//
+// NOTE: this matches ANY established :443 socket of the app process, not just
+// DERP. That is intentional and harmless: protect() only excludes the socket
+// from VPN routing, which is also correct for the app's own direct HTTPS
+// traffic (it must not loop through its own TUN). The dangerous case is
+// MISSING a DERP socket (routing loop → dead tunnel); the 30s watchdog
+// re-scan covers transient misses.
 func scanDerpSockets() []derpSocket {
 	inodes := map[int64]bool{}
 	for _, path := range []string{"/proc/self/net/tcp", "/proc/self/net/tcp6"} {
@@ -299,24 +349,7 @@ func scanDerpSockets() []derpSocket {
 		if err != nil {
 			continue
 		}
-		for _, line := range strings.Split(string(data), "\n") {
-			f := strings.Fields(line)
-			// sl local_address rem_address st ... inode
-			if len(f) < 10 || f[0] == "sl" {
-				continue
-			}
-			rem, st := f[2], f[3]
-			if st != "0A" { // ESTABLISHED
-				continue
-			}
-			parts := strings.Split(rem, ":")
-			if len(parts) != 2 || parts[1] != derpPort {
-				continue
-			}
-			inode, err := strconv.ParseInt(f[9], 10, 64)
-			if err != nil {
-				continue
-			}
+		for inode := range parseDerpInodes(string(data)) {
 			inodes[inode] = true
 		}
 	}
