@@ -96,6 +96,19 @@ class TunnelManager(
 
     fun getTunnel(): vpntunnel.Tunnel? = tunnel
 
+    /**
+     * Lấy IP egress QUA TUNNEL (không phải direct).
+     * Chỉ gọi khi tunnel đã connect — trả null nếu tunnel chưa lên hoặc egress không tới được.
+     */
+    fun fetchEgressIp(): String? {
+        return try {
+            tunnel?.fetchEgressIp()
+        } catch (e: Exception) {
+            Log.w(TAG, "fetchEgressIp: ${e.message}")
+            null
+        }
+    }
+
     fun disconnect() {
         try {
             tunnel?.close()

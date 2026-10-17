@@ -99,10 +99,23 @@ class MainActivity : Activity() {
             addView(buildBottomNav())
         })
         requestNotificationPermission()
+        // Nghe trạng thái thật từ service (broadcast TUNNEL_UP/DOWN).
+        val filter = android.content.IntentFilter().apply {
+            addAction(PocketVpnService.ACTION_TUNNEL_UP)
+            addAction(PocketVpnService.ACTION_TUNNEL_DOWN)
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(tunnelReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(tunnelReceiver, filter)
+        }
     }
 
     override fun onDestroy() {
         uiHandler.removeCallbacks(tick)
+        uiHandler.removeCallbacks(connectTimeout)
+        try { unregisterReceiver(tunnelReceiver) } catch (_: Exception) { }
         super.onDestroy()
     }
 
@@ -334,9 +347,12 @@ class MainActivity : Activity() {
                 action = PocketVpnService.ACTION_DISCONNECT
             })
             connected = false
+            connecting = false
+            uiHandler.removeCallbacks(connectTimeout)
             setUiState(UiState.IDLE)
             return
         }
+        if (connecting) return // đang nối rồi, tránh bấm 2 lần
         val prepareIntent = VpnService.prepare(this)
         if (prepareIntent != null) {
             @Suppress("DEPRECATION")
@@ -354,6 +370,51 @@ class MainActivity : Activity() {
         }
     }
 
+    // Service là nguồn duy nhất của trạng thái "đã kết nối".
+    // (Bug 2026-10-17: UI cũ tự fetch IP direct → báo nối được trong khi VPN chưa chạy.)
+    // Service broadcast TUNNEL_UP (kèm IP egress fetch QUA TUNNEL) hoặc TUNNEL_DOWN.
+    private val tunnelReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(ctx: android.content.Context?, intent: Intent?) {
+            when (intent?.action) {
+                PocketVpnService.ACTION_TUNNEL_UP -> {
+                    val ip = intent.getStringExtra(PocketVpnService.EXTRA_IP)
+                    if (connecting) {
+                        connecting = false
+                        connected = true
+                        uiHandler.removeCallbacks(connectTimeout)
+                        setUiState(UiState.CONNECTED, ip)
+                    }
+                }
+                PocketVpnService.ACTION_TUNNEL_DOWN -> {
+                    val reason = intent.getStringExtra(PocketVpnService.EXTRA_REASON)
+                    if (connecting || connected) {
+                        connecting = false
+                        connected = false
+                        uiHandler.removeCallbacks(connectTimeout)
+                        setUiState(UiState.IDLE)
+                        statusText.text = "Không kết nối được — thử lại"
+                        if (reason != null) {
+                            Toast.makeText(this@MainActivity, reason, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var connecting = false
+    private val connectTimeout = Runnable {
+        if (connecting) {
+            connecting = false
+            connected = false
+            setUiState(UiState.IDLE)
+            statusText.text = "Không kết nối được — thử lại"
+            startService(Intent(this, PocketVpnService::class.java).apply {
+                action = PocketVpnService.ACTION_DISCONNECT
+            })
+        }
+    }
+
     private fun startVpn() {
         val tm = TunnelManager(this, null)
         if (!tm.hasServeAddr()) {
@@ -365,23 +426,11 @@ class MainActivity : Activity() {
         startForegroundService(Intent(this, PocketVpnService::class.java).apply {
             action = PocketVpnService.ACTION_CONNECT
         })
-        connected = true
+        connecting = true
+        connected = false
         setUiState(UiState.CONNECTING)
-        EgressIp.fetch { ip ->
-            runOnUiThread {
-                if (!connected) return@runOnUiThread
-                if (ip != null) {
-                    setUiState(UiState.CONNECTED, ip)
-                } else {
-                    connected = false
-                    setUiState(UiState.IDLE)
-                    statusText.text = "Không kết nối được — thử lại"
-                    startService(Intent(this, PocketVpnService::class.java).apply {
-                        action = PocketVpnService.ACTION_DISCONNECT
-                    })
-                }
-            }
-        }
+        // Timeout 45s: service không broadcast = có vấn đề → báo lỗi, không treo ở "Đang kết nối".
+        uiHandler.postDelayed(connectTimeout, 45_000)
     }
 
     // ============ TAB HỒ SƠ ============

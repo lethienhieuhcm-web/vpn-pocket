@@ -28,6 +28,11 @@ class PocketVpnService : VpnService() {
     companion object {
         const val ACTION_CONNECT = "one.lethanhdong.vpnpocket.CONNECT"
         const val ACTION_DISCONNECT = "one.lethanhdong.vpnpocket.DISCONNECT"
+        // Broadcast khi service xác minh xong trạng thái thật (sau khi fetch IP qua tunnel).
+        const val ACTION_TUNNEL_UP = "one.lethanhdong.vpnpocket.TUNNEL_UP"
+        const val ACTION_TUNNEL_DOWN = "one.lethanhdong.vpnpocket.TUNNEL_DOWN"
+        const val EXTRA_IP = "ip"
+        const val EXTRA_REASON = "reason"
         private const val TAG = "PocketVpn"
         private const val CHANNEL_ID = "vpn_pocket_tunnel"
         private const val NOTIF_ID = 1
@@ -139,7 +144,41 @@ class PocketVpnService : VpnService() {
         updateNotification("Đã kết nối")
         Log.i(TAG, "TUN established (mtu=$MTU)")
         onTunnelReady(fd)
+        // Verify end-to-end QUA TUNNEL trước khi báo UI "đã kết nối".
+        // (Bug 2026-10-17: UI cũ tự fetch IP direct → báo nối được trong khi VPN chưa chạy.)
+        verifyAndBroadcast(tm)
         return true
+    }
+
+    /**
+     * Fetch IP egress qua tunnel của service. Thành công = tunnel → proxy → internet
+     * thật sự thông. Thất bại = dừng service, broadcast DOWN để UI báo đúng.
+     * Chạy ở background thread để không block onStartCommand.
+     */
+    private fun verifyAndBroadcast(tm: TunnelManager) {
+        Thread {
+            var ip: String? = null
+            for (attempt in 0 until 3) {
+                if (attempt > 0) Thread.sleep(5000)
+                ip = tm.fetchEgressIp()
+                if (ip != null) break
+            }
+            if (ip != null) {
+                Log.i(TAG, "egress verified via tunnel: $ip")
+                updateNotification("Đã kết nối")
+                sendBroadcast(Intent(ACTION_TUNNEL_UP).apply {
+                    putExtra(EXTRA_IP, ip)
+                    setPackage(packageName)
+                })
+            } else {
+                Log.e(TAG, "tunnel up but egress unreachable — stopping")
+                sendBroadcast(Intent(ACTION_TUNNEL_DOWN).apply {
+                    putExtra(EXTRA_REASON, "Không tới được Internet qua tunnel")
+                    setPackage(packageName)
+                })
+                mainHandler.post { stopTunnel(); stopSelf() }
+            }
+        }.start()
     }
 
     /**

@@ -228,6 +228,59 @@ func (t *Tunnel) ResolveDoH(query []byte) ([]byte, error) {
 	return body, nil
 }
 
+// FetchEgressIp returns the public IP as seen by api.ipify.org, fetched
+// THROUGH the tunnel (not a direct connection).
+// This proves end-to-end connectivity: tunnel → VM proxy → egress → internet.
+// The Android UI must only show "connected" when this succeeds — a direct
+// HTTPS fetch would return the real IP even when the VPN is broken (bug 2026-10-17:
+// UI showed "Đã kết nối" with the carrier CGNAT IP while browser bypassed the VPN).
+func (t *Tunnel) FetchEgressIp() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+	defer cancel()
+
+	raw, err := t.dialProxyConn(ctx, "api.ipify.org", 443)
+	if err != nil {
+		return "", err
+	}
+	tlsConn := tls.Client(raw, &tls.Config{ServerName: "api.ipify.org"})
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		raw.Close()
+		return "", fmt.Errorf("vpntunnel: egress IP TLS: %w", err)
+	}
+
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return tlsConn, nil
+		},
+		DisableKeepAlives: true,
+	}
+	httpClient := &http.Client{Transport: transport, Timeout: dialTimeout}
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.ipify.org", nil)
+	if err != nil {
+		tlsConn.Close()
+		return "", err
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		tlsConn.Close()
+		return "", fmt.Errorf("vpntunnel: egress IP request: %w", err)
+	}
+	defer resp.Body.Close()
+	defer tlsConn.Close()
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("vpntunnel: egress IP status %s", resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64))
+	if err != nil {
+		return "", fmt.Errorf("vpntunnel: egress IP read: %w", err)
+	}
+	ip := strings.TrimSpace(string(body))
+	if ip == "" || len(ip) > 45 {
+		return "", errors.New("vpntunnel: egress IP invalid response")
+	}
+	return ip, nil
+}
+
 // ProtectScan re-scans /proc for DERP sockets and protects any new ones.
 // Called by the watchdog every 30s (DERP reconnects use new sockets).
 // Returns the number of newly protected sockets.
