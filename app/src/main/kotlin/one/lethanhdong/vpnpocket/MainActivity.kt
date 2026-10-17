@@ -21,11 +21,12 @@ import android.widget.TextView
 import android.widget.Toast
 
 /**
- * Màn hình chính VPN Pocket — bottom navigation 2 tab (Trang chủ / Cài đặt).
+ * Màn hình chính VPN Pocket — bottom navigation 3 tab (Trang chủ / Hồ sơ / Cài đặt).
  *
  * Học từ mổ ProtonVPN 5.20.74.0 (screenshot thật từ máy Henrry 2026-10-17):
- * - Bottom nav: Home / Countries / Profiles / Settings → gọn lại 2 tab
- *   (app cá nhân 1 server, không cần Countries/Profiles)
+ * - Bottom nav: Home / Countries / Profiles / Settings → gọn lại 3 tab
+ *   (bỏ Countries: app cá nhân 1 server, không bịa danh sách nước)
+ * - Tab Hồ sơ: 2 profile Mode A (P2) / Mode B (P3 "Sắp có") — như Proton cho tạo profile
  * - Section header màu accent: "Features" / "Connection" / "General" → "MÁY CHỦ" / "KẾT NỐI" / "ỨNG DỤNG"
  * - Card bo tròn dark, icon + label + value
  * - Accent tím Proton (#7C5CFF)
@@ -43,9 +44,14 @@ class MainActivity : Activity() {
 
     // --- Tab container ---
     private lateinit var homeView: LinearLayout
+    private lateinit var profilesView: LinearLayout
     private lateinit var settingsView: LinearLayout
     private lateinit var tabHome: LinearLayout
+    private lateinit var tabProfiles: LinearLayout
     private lateinit var tabSettings: LinearLayout
+
+    // 0=Home, 1=Profiles, 2=Settings
+    private var currentTab = 0
 
     private var connected = false
     private var connectedSince: Long = 0L
@@ -75,6 +81,8 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         homeView = buildHomeView()
+        profilesView = buildProfilesView()
+        profilesView.visibility = View.GONE
         settingsView = buildSettingsView()
         settingsView.visibility = View.GONE
         setContentView(LinearLayout(this).apply {
@@ -85,6 +93,7 @@ class MainActivity : Activity() {
                     LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
                 )
                 addView(homeView)
+                addView(profilesView)
                 addView(settingsView)
             })
             addView(buildBottomNav())
@@ -121,7 +130,11 @@ class MainActivity : Activity() {
             setTextColor(if (selected) accent else textSub)
         }
         // Gán icon theo tab.
-        icon.text = if (labelStr == "Trang chủ") "⌂" else "⚙"
+        icon.text = when (labelStr) {
+            "Trang chủ" -> "⌂"
+            "Hồ sơ" -> "▤"
+            else -> "⚙"
+        }
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -137,26 +150,33 @@ class MainActivity : Activity() {
 
     private fun buildBottomNav(): LinearLayout {
         tabHome = navTab(0, "Trang chủ", true) { selectTab(0) }
-        tabSettings = navTab(0, "Cài đặt", false) { selectTab(1) }
+        tabProfiles = navTab(0, "Hồ sơ", false) { selectTab(1) }
+        tabSettings = navTab(0, "Cài đặt", false) { selectTab(2) }
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(navBg)
             setPadding(0, dp(4), 0, dp(8))
             addView(tabHome)
+            addView(tabProfiles)
             addView(tabSettings)
         }
     }
 
+    private fun setTabSelected(tab: LinearLayout, selected: Boolean) {
+        (tab.getChildAt(0) as TextView).setTextColor(if (selected) accent else textSub)
+        (tab.getChildAt(1) as TextView).setTextColor(if (selected) accent else textSub)
+    }
+
     private fun selectTab(index: Int) {
-        val homeSelected = index == 0
-        homeView.visibility = if (homeSelected) View.VISIBLE else View.GONE
-        settingsView.visibility = if (homeSelected) View.GONE else View.VISIBLE
-        // Vẽ lại nav để đổi màu selected.
-        (tabHome.getChildAt(0) as TextView).setTextColor(if (homeSelected) accent else textSub)
-        (tabHome.getChildAt(1) as TextView).setTextColor(if (homeSelected) accent else textSub)
-        (tabSettings.getChildAt(0) as TextView).setTextColor(if (!homeSelected) accent else textSub)
-        (tabSettings.getChildAt(1) as TextView).setTextColor(if (!homeSelected) accent else textSub)
-        if (!homeSelected) refreshSettings()
+        currentTab = index
+        homeView.visibility = if (index == 0) View.VISIBLE else View.GONE
+        profilesView.visibility = if (index == 1) View.VISIBLE else View.GONE
+        settingsView.visibility = if (index == 2) View.VISIBLE else View.GONE
+        setTabSelected(tabHome, index == 0)
+        setTabSelected(tabProfiles, index == 1)
+        setTabSelected(tabSettings, index == 2)
+        if (index == 1) refreshProfiles()
+        if (index == 2) refreshSettings()
     }
 
     // ============ TAB HOME ============
@@ -338,7 +358,7 @@ class MainActivity : Activity() {
         val tm = TunnelManager(this, null)
         if (!tm.hasServeAddr()) {
             // Chưa có server → mở tab Cài đặt để quét QR.
-            selectTab(1)
+            selectTab(2)
             Toast.makeText(this, "Quét mã QR máy chủ trước", Toast.LENGTH_LONG).show()
             return
         }
@@ -361,6 +381,117 @@ class MainActivity : Activity() {
                     })
                 }
             }
+        }
+    }
+
+    // ============ TAB HỒ SƠ ============
+    // Học Proton: Profiles tab cho tạo/chọn profile kết nối.
+    // App mình: 2 profile cố định — Mode A (P2, khả dụng), Mode B (P3, "Sắp có").
+
+    private lateinit var profileModeAStatus: TextView
+
+    private fun profileCard(
+        name: String,
+        desc: String,
+        statusView: TextView,
+        enabled: Boolean,
+        onClick: (() -> Unit)?
+    ): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = rounded(cardBg, 14)
+        setPadding(dp(18), dp(16), dp(18), dp(16))
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(8) }
+        alpha = if (enabled) 1f else 0.5f
+        addView(LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            addView(TextView(this@MainActivity).apply {
+                text = name
+                textSize = 17f
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(textMain)
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = desc
+                textSize = 14f
+                setTextColor(textSub)
+            })
+        })
+        addView(statusView)
+        if (enabled && onClick != null) {
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onClick() }
+        }
+    }
+
+    private fun profileStatus(text: String, color: Int): TextView = TextView(this).apply {
+        this.text = text
+        textSize = 13f
+        setTypeface(typeface, Typeface.BOLD)
+        setTextColor(color)
+        background = rounded(0xFF2A2A3A.toInt(), 8)
+        setPadding(dp(10), dp(6), dp(10), dp(6))
+    }
+
+    private fun buildProfilesView(): LinearLayout {
+        profileModeAStatus = profileStatus("", textSub)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(bg)
+            setPadding(dp(24), dp(48), dp(24), dp(24))
+        }
+        root.addView(TextView(this).apply {
+            text = "Hồ sơ"
+            textSize = 26f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(textMain)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(16) }
+        })
+        root.addView(profileCard(
+            "Mode A",
+            "TCP qua máy chủ cá nhân • DNS qua DoH",
+            profileModeAStatus,
+            enabled = true,
+            onClick = {
+                // Chọn Mode A = về tab Trang chủ để kết nối.
+                selectTab(0)
+                if (!connected) onConnectClicked()
+            }
+        ))
+        root.addView(profileCard(
+            "Mode B",
+            "ProxyScrape Residential • UDP cho gọi thoại",
+            profileStatus("Sắp có", textSub),
+            enabled = false,
+            onClick = null
+        ))
+        root.addView(TextView(this).apply {
+            text = "Mode B (P3) cho phép gọi thoại/game qua UDP. Hiện tại chỉ Mode A khả dụng."
+            textSize = 13f
+            setTextColor(textSub)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(16) }
+        })
+        return root
+    }
+
+    private fun refreshProfiles() {
+        if (connected) {
+            profileModeAStatus.text = "Đang dùng"
+            profileModeAStatus.setTextColor(green)
+        } else {
+            profileModeAStatus.text = "Khả dụng"
+            profileModeAStatus.setTextColor(accent)
         }
     }
 
