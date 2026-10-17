@@ -18,4 +18,4 @@ security-crypto = { group = "androidx.security", name = "security-crypto", versi
 
 [plugins]
 agp = { id = "com.android.application", version.ref = "agp" }
-kotlin = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+# (không dùng org.jetbrains.kotlin.android — AGP 9.x đã tích hợp sẵn; apply thêm gây clash)

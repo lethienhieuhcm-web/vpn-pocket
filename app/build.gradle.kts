@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.agp)
-    alias(libs.plugins.kotlin)
+    // AGP 9.x đã tích hợp sẵn Kotlin support — KHÔNG apply org.jetbrains.kotlin.android
+    // (apply thêm sẽ clash: "Cannot add extension with name 'kotlin'" — gặp ở CI run #4)
 }
 
 android {
@@ -24,9 +25,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
     }
-    kotlinOptions {
-        jvmTarget = "21"
-    }
+    // (không có kotlinOptions — đi theo AGP 9.x integrated Kotlin như DAC)
 }
 
 dependencies {
