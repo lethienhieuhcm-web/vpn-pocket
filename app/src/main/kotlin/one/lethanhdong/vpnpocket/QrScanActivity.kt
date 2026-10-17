@@ -150,9 +150,12 @@ class QrScanActivity : ComponentActivity() {
         Thread {
             try {
                 val bitmap = if (Build.VERSION.SDK_INT >= 28) {
-                    ImageDecoder.decodeBitmap(
-                        ImageDecoder.createSource(contentResolver, uri)
-                    )
+                    val src = ImageDecoder.createSource(contentResolver, uri)
+                    ImageDecoder.decodeBitmap(src) { decoder, _, _ ->
+                        // Ép software bitmap: getPixels() crash trên hardware bitmap
+                        // (ImageDecoder mặc định có thể trả về HARDWARE trên API 28+).
+                        decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                    }
                 } else {
                     @Suppress("DEPRECATION")
                     MediaStore.Images.Media.getBitmap(contentResolver, uri)
@@ -161,7 +164,8 @@ class QrScanActivity : ComponentActivity() {
                 val h = bitmap.height
                 val pixels = IntArray(w * h)
                 bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
-                val result = reader.decode(
+                // Reader riêng (không dùng chung với camera analyzer) để tránh race.
+                val result = MultiFormatReader().decode(
                     BinaryBitmap(HybridBinarizer(RGBLuminanceSource(w, h, pixels)))
                 )
                 val text = result.text?.trim().orEmpty()
