@@ -48,8 +48,13 @@ jobs:
           "$(go env GOPATH)/bin/gomobile" init
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
+      # NOTE: must run from inside vpntunnel/ (the Go module dir). gomobile checks
+      # for x/mobile via `go env GOMOD` + packages.Load in the current working
+      # directory — running from the repo root (no go.mod, GOMOD=/dev/null) fails
+      # the check even with the tool directive in go.mod.
       - name: Build AAR (arm64)
-        run: gomobile bind -target=android/arm64 -o vpntunnel.aar ./vpntunnel
+        working-directory: vpntunnel
+        run: gomobile bind -target=android/arm64 -o ../vpntunnel.aar .
 
       - name: Upload AAR
         uses: actions/upload-artifact@v4
