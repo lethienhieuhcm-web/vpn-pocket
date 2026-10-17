@@ -28,9 +28,15 @@ class PocketVpnService : VpnService() {
     companion object {
         const val ACTION_CONNECT = "one.lethanhdong.vpnpocket.CONNECT"
         const val ACTION_DISCONNECT = "one.lethanhdong.vpnpocket.DISCONNECT"
-        // Broadcast khi service xác minh xong trạng thái thật (sau khi fetch IP qua tunnel).
-        const val ACTION_TUNNEL_UP = "one.lethanhdong.vpnpocket.TUNNEL_UP"
-        const val ACTION_TUNNEL_DOWN = "one.lethanhdong.vpnpocket.TUNNEL_DOWN"
+        // State machine học ProtonVPN (VpnState): service broadcast từng giai đoạn,
+        // UI chỉ nghe và hiển thị — không tự đoán trạng thái.
+        // (Bỏ ScanningPorts của họ vì mình dùng DERP cố định 443, không scan port.)
+        const val ACTION_TUNNEL_CHECKING = "one.lethanhdong.vpnpocket.TUNNEL_CHECKING" // đang kiểm tra máy chủ
+        const val ACTION_TUNNEL_CONNECTING = "one.lethanhdong.vpnpocket.TUNNEL_CONNECTING" // đang nối tunnel
+        const val ACTION_TUNNEL_VERIFYING = "one.lethanhdong.vpnpocket.TUNNEL_VERIFYING" // đang xác minh qua tunnel
+        const val ACTION_TUNNEL_UP = "one.lethanhdong.vpnpocket.TUNNEL_UP" // đã kết nối (kèm IP)
+        const val ACTION_TUNNEL_DOWN = "one.lethanhdong.vpnpocket.TUNNEL_DOWN" // lỗi/ngắt (kèm lý do)
+        const val ACTION_TUNNEL_RECONNECTING = "one.lethanhdong.vpnpocket.TUNNEL_RECONNECTING" // watchdog nối lại
         const val EXTRA_IP = "ip"
         const val EXTRA_REASON = "reason"
         private const val TAG = "PocketVpn"
@@ -60,9 +66,12 @@ class PocketVpnService : VpnService() {
             if (tm != null) {
                 // Tự reconnect nếu tunnel chưa lên (vd lần đầu fail do mất mạng).
                 if (tm.getTunnel() == null && tm.hasServeAddr()) {
+                    broadcast(ACTION_TUNNEL_RECONNECTING)
+                    updateNotification("Đang kết nối lại…")
                     try {
                         tm.connect()
-                        updateNotification("Đã kết nối")
+                        // Verify lại sau reconnect (giống lần đầu).
+                        verifyAndBroadcast(tm)
                         Log.i(TAG, "watchdog: reconnected")
                     } catch (e: Exception) {
                         Log.w(TAG, "watchdog reconnect failed: ${e.message}")
@@ -113,29 +122,44 @@ class PocketVpnService : VpnService() {
         super.onDestroy()
     }
 
+    private fun broadcast(action: String, ip: String? = null, reason: String? = null) {
+        sendBroadcast(Intent(action).apply {
+            if (ip != null) putExtra(EXTRA_IP, ip)
+            if (reason != null) putExtra(EXTRA_REASON, reason)
+            setPackage(packageName)
+        })
+    }
+
     private fun startTunnel(): Boolean {
         startForeground(NOTIF_ID, buildNotification("Đang kết nối…"))
         // THỨ TỰ BẮT BUỘC: connect tunnel TRƯỚC khi establish() TUN.
         // Socket DERP tạo trong Ping() phải đi đường mạng thường. Nếu establish()
         // trước, packet DERP lọt vào TUN (chưa có forwarder) → blackhole → Ping timeout.
         // protect() gọi trong Connect() vẫn hiệu lực sau khi TUN lên.
+        broadcast(ACTION_TUNNEL_CHECKING)
+        updateNotification("Đang kiểm tra máy chủ…")
         val tm = TunnelManager(this, this)
         tunnelManager = tm
         if (!tm.hasServeAddr()) {
             Log.e(TAG, "no serve address")
+            broadcast(ACTION_TUNNEL_DOWN, reason = "Chưa quét mã QR máy chủ")
             stopForeground(STOP_FOREGROUND_REMOVE)
             return false
         }
+        broadcast(ACTION_TUNNEL_CONNECTING)
+        updateNotification("Đang nối tunnel…")
         try {
             tm.connect()
         } catch (e: Exception) {
             Log.e(TAG, "tunnel connect failed: ${e.message}")
-            updateNotification("Không kết nối được: ${e.message}")
+            broadcast(ACTION_TUNNEL_DOWN, reason = "Không nối được tunnel: ${e.message}")
+            updateNotification("Không kết nối được")
             stopForeground(STOP_FOREGROUND_REMOVE)
             return false
         }
         val fd = buildTun() ?: run {
             Log.e(TAG, "establish() failed")
+            broadcast(ACTION_TUNNEL_DOWN, reason = "Không dựng được TUN (thiếu quyền VPN?)")
             tm.disconnect()
             stopForeground(STOP_FOREGROUND_REMOVE)
             return false
@@ -156,6 +180,8 @@ class PocketVpnService : VpnService() {
      * Chạy ở background thread để không block onStartCommand.
      */
     private fun verifyAndBroadcast(tm: TunnelManager) {
+        broadcast(ACTION_TUNNEL_VERIFYING)
+        updateNotification("Đang xác minh kết nối…")
         Thread {
             var ip: String? = null
             for (attempt in 0 until 3) {
@@ -166,16 +192,10 @@ class PocketVpnService : VpnService() {
             if (ip != null) {
                 Log.i(TAG, "egress verified via tunnel: $ip")
                 updateNotification("Đã kết nối")
-                sendBroadcast(Intent(ACTION_TUNNEL_UP).apply {
-                    putExtra(EXTRA_IP, ip)
-                    setPackage(packageName)
-                })
+                broadcast(ACTION_TUNNEL_UP, ip = ip)
             } else {
                 Log.e(TAG, "tunnel up but egress unreachable — stopping")
-                sendBroadcast(Intent(ACTION_TUNNEL_DOWN).apply {
-                    putExtra(EXTRA_REASON, "Không tới được Internet qua tunnel")
-                    setPackage(packageName)
-                })
+                broadcast(ACTION_TUNNEL_DOWN, reason = "Tunnel lên nhưng không tới được Internet")
                 mainHandler.post { stopTunnel(); stopSelf() }
             }
         }.start()

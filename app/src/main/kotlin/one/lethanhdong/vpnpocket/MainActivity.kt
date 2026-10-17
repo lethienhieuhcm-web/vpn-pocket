@@ -99,8 +99,12 @@ class MainActivity : Activity() {
             addView(buildBottomNav())
         })
         requestNotificationPermission()
-        // Nghe trạng thái thật từ service (broadcast TUNNEL_UP/DOWN).
+        // Nghe trạng thái thật từ service (broadcast từng giai đoạn, học ProtonVPN).
         val filter = android.content.IntentFilter().apply {
+            addAction(PocketVpnService.ACTION_TUNNEL_CHECKING)
+            addAction(PocketVpnService.ACTION_TUNNEL_CONNECTING)
+            addAction(PocketVpnService.ACTION_TUNNEL_VERIFYING)
+            addAction(PocketVpnService.ACTION_TUNNEL_RECONNECTING)
             addAction(PocketVpnService.ACTION_TUNNEL_UP)
             addAction(PocketVpnService.ACTION_TUNNEL_DOWN)
         }
@@ -372,10 +376,23 @@ class MainActivity : Activity() {
 
     // Service là nguồn duy nhất của trạng thái "đã kết nối".
     // (Bug 2026-10-17: UI cũ tự fetch IP direct → báo nối được trong khi VPN chưa chạy.)
-    // Service broadcast TUNNEL_UP (kèm IP egress fetch QUA TUNNEL) hoặc TUNNEL_DOWN.
+    // Service broadcast từng giai đoạn (học ProtonVPN VpnState); UI chỉ nghe và hiển thị.
     private val tunnelReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(ctx: android.content.Context?, intent: Intent?) {
             when (intent?.action) {
+                PocketVpnService.ACTION_TUNNEL_CHECKING -> {
+                    if (connecting) statusText.text = "Đang kiểm tra máy chủ…"
+                }
+                PocketVpnService.ACTION_TUNNEL_CONNECTING -> {
+                    if (connecting) statusText.text = "Đang nối tunnel…"
+                }
+                PocketVpnService.ACTION_TUNNEL_VERIFYING -> {
+                    if (connecting) statusText.text = "Đang xác minh kết nối…"
+                }
+                PocketVpnService.ACTION_TUNNEL_RECONNECTING -> {
+                    statusText.text = "Đang kết nối lại…"
+                    statusDot.background = rounded(0xFFFFB340.toInt(), 6)
+                }
                 PocketVpnService.ACTION_TUNNEL_UP -> {
                     val ip = intent.getStringExtra(PocketVpnService.EXTRA_IP)
                     if (connecting) {
@@ -392,7 +409,7 @@ class MainActivity : Activity() {
                         connected = false
                         uiHandler.removeCallbacks(connectTimeout)
                         setUiState(UiState.IDLE)
-                        statusText.text = "Không kết nối được — thử lại"
+                        statusText.text = reason ?: "Không kết nối được — thử lại"
                         if (reason != null) {
                             Toast.makeText(this@MainActivity, reason, Toast.LENGTH_LONG).show()
                         }
