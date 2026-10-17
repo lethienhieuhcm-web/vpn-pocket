@@ -114,9 +114,12 @@ class PocketVpnService : VpnService() {
      */
     private fun onTunnelReady(fd: ParcelFileDescriptor) {
         val tm = tunnelManager ?: return
+        // P2.4: DNS → DoH. UDP khác → P2.5 drop (hiện chỉ log).
+        val dns = DnsHandler(tm) { pkt -> forwarder?.writeTun(pkt) }
         forwarder = TcpForwarder(fd, tm, onUdp = { pkt ->
-            // TODO P2.4: DNS (UDP/53) → DoH; P2.5: UDP khác → drop + toast.
-            Log.d(TAG, "UDP packet dropped (${pkt.size} bytes), TODO P2.4/P2.5")
+            if (!dns.handleUdpPacket(pkt)) {
+                Log.d(TAG, "UDP non-DNS dropped (${pkt.size} bytes), TODO P2.5 toast")
+            }
         }).apply { start() }
     }
 

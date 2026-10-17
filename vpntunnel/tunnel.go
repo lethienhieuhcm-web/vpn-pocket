@@ -14,9 +14,12 @@ package vpntunnel
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -107,9 +110,9 @@ func (t *Tunnel) Connect() error {
 	return nil
 }
 
-// DialTCP opens a TCP stream through the tunnel to host:port (Mode A).
-// It dials the VM proxy port through the tunnel and issues HTTP CONNECT.
-func (t *Tunnel) DialTCP(host string, port int) (*Conn, error) {
+// dialProxyConn dials host:port through the tunnel via the VM proxy
+// (DialTCPPort 8899 + HTTP CONNECT). Shared by DialTCP and ResolveDoH.
+func (t *Tunnel) dialProxyConn(ctx context.Context, host string, port int) (net.Conn, error) {
 	t.mu.Lock()
 	if t.closed {
 		t.mu.Unlock()
@@ -118,13 +121,10 @@ func (t *Tunnel) DialTCP(host string, port int) (*Conn, error) {
 	client := t.client
 	t.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
-	defer cancel()
 	raw, err := client.DialTCPPort(ctx, 8899)
 	if err != nil {
 		return nil, fmt.Errorf("vpntunnel: dial: %w", err)
 	}
-	// HTTP CONNECT handshake with the VM proxy.
 	raw.SetDeadline(time.Now().Add(dialTimeout))
 	req := fmt.Sprintf("CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n\r\n", host, port, host, port)
 	if _, err := raw.Write([]byte(req)); err != nil {
@@ -142,8 +142,77 @@ func (t *Tunnel) DialTCP(host string, port int) (*Conn, error) {
 		raw.Close()
 		return nil, fmt.Errorf("vpntunnel: CONNECT status %s", resp.Status)
 	}
-	raw.SetDeadline(time.Time{}) // blocking mode for the data phase
-	return &Conn{conn: raw, br: br}, nil
+	raw.SetDeadline(time.Time{})
+	// NOTE: br may have buffered data; for CONNECT there is none (empty body).
+	// We return raw; callers needing the buffered reader should handle it.
+	// For our uses (fresh CONNECT), br is empty.
+	_ = br
+	return raw, nil
+}
+
+// DialTCP opens a TCP stream through the tunnel to host:port (Mode A).
+// It dials the VM proxy port through the tunnel and issues HTTP CONNECT.
+func (t *Tunnel) DialTCP(host string, port int) (*Conn, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+	defer cancel()
+	raw, err := t.dialProxyConn(ctx, host, port)
+	if err != nil {
+		return nil, err
+	}
+	// Re-wrap with a fresh reader (CONNECT left no buffered data).
+	return &Conn{conn: raw, br: bufio.NewReader(raw)}, nil
+}
+
+// ResolveDoH sends a raw DNS query via DNS-over-HTTPS (dns.google)
+// through the tunnel and returns the raw DNS response.
+// Mode A has no UDP, so DNS goes over TCP/TLS inside the tunnel.
+func (t *Tunnel) ResolveDoH(query []byte) ([]byte, error) {
+	if len(query) < 12 {
+		return nil, errors.New("vpntunnel: DNS query too short")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+	defer cancel()
+
+	raw, err := t.dialProxyConn(ctx, "dns.google", 443)
+	if err != nil {
+		return nil, err
+	}
+	tlsConn := tls.Client(raw, &tls.Config{ServerName: "dns.google"})
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		raw.Close()
+		return nil, fmt.Errorf("vpntunnel: DoH TLS: %w", err)
+	}
+
+	// Single-use HTTP client over the already-connected TLS conn.
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return tlsConn, nil
+		},
+		DisableKeepAlives: true,
+	}
+	httpClient := &http.Client{Transport: transport, Timeout: dialTimeout}
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://dns.google/dns-query", bytes.NewReader(query))
+	if err != nil {
+		tlsConn.Close()
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/dns-message")
+	req.Header.Set("Accept", "application/dns-message")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		tlsConn.Close()
+		return nil, fmt.Errorf("vpntunnel: DoH request: %w", err)
+	}
+	defer resp.Body.Close()
+	defer tlsConn.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("vpntunnel: DoH status %s", resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return nil, fmt.Errorf("vpntunnel: DoH read: %w", err)
+	}
+	return body, nil
 }
 
 // ProtectScan re-scans /proc for DERP sockets and protects any new ones.
