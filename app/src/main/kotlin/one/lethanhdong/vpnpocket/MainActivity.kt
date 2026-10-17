@@ -14,35 +14,39 @@ import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
-import android.widget.ImageButton
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Space
 import android.widget.TextView
+import android.widget.Toast
 
 /**
- * Màn hình chính VPN Pocket (thiết kế lại theo 8b, học từ mổ ProtonVPN 5.20.74.0).
+ * Màn hình chính VPN Pocket — bottom navigation 2 tab (Trang chủ / Cài đặt).
  *
- * Những gì Proton hiện (verify từ strings.xml decompile):
- * - connection_details_server/country/city: tên + vị trí server
- * - connection_details_my_ip/my_ipv4/my_ipv6: IP của user
- * - connection_details_protocol: protocol đang dùng
- * - connection_details_connected_for: thời gian đã kết nối
- * - connection_details_section_vpn_speed: tốc độ
- *
- * Áp dụng trung thực cho app cá nhân 1 server (không bịa):
- * - Server: "Máy chủ cá nhân" (không bịa quốc gia — IP egress xoay, không tra geo)
- * - IP: IP egress thật (lấy qua tunnel khi đã nối)
- * - Protocol: "TCP" (Mode A là TCP-only — đúng spec)
- * - Thời gian kết nối: đếm thật từ lúc nối thành công
+ * Học từ mổ ProtonVPN 5.20.74.0 (screenshot thật từ máy Henrry 2026-10-17):
+ * - Bottom nav: Home / Countries / Profiles / Settings → gọn lại 2 tab
+ *   (app cá nhân 1 server, không cần Countries/Profiles)
+ * - Section header màu accent: "Features" / "Connection" / "General" → "MÁY CHỦ" / "KẾT NỐI" / "ỨNG DỤNG"
+ * - Card bo tròn dark, icon + label + value
+ * - Accent tím Proton (#7C5CFF)
+ * - Connection details (verify từ strings.xml): server, My IP, protocol, connected_for
  */
 class MainActivity : Activity() {
 
+    // --- Views tab Home ---
     private lateinit var statusDot: View
     private lateinit var statusText: TextView
     private lateinit var serverText: TextView
     private lateinit var ipText: TextView
     private lateinit var durationText: TextView
     private lateinit var connectBtn: Button
+
+    // --- Tab container ---
+    private lateinit var homeView: LinearLayout
+    private lateinit var settingsView: LinearLayout
+    private lateinit var tabHome: LinearLayout
+    private lateinit var tabSettings: LinearLayout
+
     private var connected = false
     private var connectedSince: Long = 0L
 
@@ -56,26 +60,36 @@ class MainActivity : Activity() {
         }
     }
 
-    // Bảng màu.
-    private val bg = 0xFF0F1419.toInt()
-    private val cardBg = 0xFF1A2230.toInt()
-    private val rowBg = 0xFF222C3D.toInt()
+    // Bảng màu (học Proton: dark + accent tím).
+    private val bg = 0xFF14141F.toInt()
+    private val cardBg = 0xFF23232F.toInt()
+    private val rowBg = 0xFF2A2A3A.toInt()
+    private val navBg = 0xFF1A1A26.toInt()
     private val textMain = 0xFFFFFFFF.toInt()
     private val textSub = 0xFF8B95A5.toInt()
-    private val blue = 0xFF2E7CF6.toInt()
+    private val accent = 0xFF7C5CFF.toInt() // tím Proton
     private val green = 0xFF34C759.toInt()
     private val gray = 0xFF3A4356.toInt()
     private val red = 0xFFE5484D.toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(buildUi())
+        homeView = buildHomeView()
+        settingsView = buildSettingsView()
+        settingsView.visibility = View.GONE
+        setContentView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(bg)
+            addView(FrameLayout(this@MainActivity).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+                )
+                addView(homeView)
+                addView(settingsView)
+            })
+            addView(buildBottomNav())
+        })
         requestNotificationPermission()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        // Cập nhật trạng thái QR (không reset trạng thái kết nối).
     }
 
     override fun onDestroy() {
@@ -90,6 +104,62 @@ class MainActivity : Activity() {
             setColor(color)
             cornerRadius = dp(radiusDp).toFloat()
         }
+
+    // ============ BOTTOM NAV ============
+
+    private fun navTab(iconRes: Int, labelStr: String, selected: Boolean, onClick: () -> Unit): LinearLayout {
+        val icon = TextView(this).apply {
+            // Dùng ký tự unicode làm icon (không cần drawable).
+            textSize = 22f
+            gravity = Gravity.CENTER
+            setTextColor(if (selected) accent else textSub)
+        }
+        val label = TextView(this).apply {
+            text = labelStr
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setTextColor(if (selected) accent else textSub)
+        }
+        // Gán icon theo tab.
+        icon.text = if (labelStr == "Trang chủ") "⌂" else "⚙"
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(0, dp(10), 0, dp(10))
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            isClickable = true
+            isFocusable = true
+            addView(icon)
+            addView(label)
+            setOnClickListener { onClick() }
+        }
+    }
+
+    private fun buildBottomNav(): LinearLayout {
+        tabHome = navTab(0, "Trang chủ", true) { selectTab(0) }
+        tabSettings = navTab(0, "Cài đặt", false) { selectTab(1) }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(navBg)
+            setPadding(0, dp(4), 0, dp(8))
+            addView(tabHome)
+            addView(tabSettings)
+        }
+    }
+
+    private fun selectTab(index: Int) {
+        val homeSelected = index == 0
+        homeView.visibility = if (homeSelected) View.VISIBLE else View.GONE
+        settingsView.visibility = if (homeSelected) View.GONE else View.VISIBLE
+        // Vẽ lại nav để đổi màu selected.
+        (tabHome.getChildAt(0) as TextView).setTextColor(if (homeSelected) accent else textSub)
+        (tabHome.getChildAt(1) as TextView).setTextColor(if (homeSelected) accent else textSub)
+        (tabSettings.getChildAt(0) as TextView).setTextColor(if (!homeSelected) accent else textSub)
+        (tabSettings.getChildAt(1) as TextView).setTextColor(if (!homeSelected) accent else textSub)
+        if (!homeSelected) refreshSettings()
+    }
+
+    // ============ TAB HOME ============
 
     private fun label(text: String): TextView = TextView(this).apply {
         this.text = text
@@ -117,7 +187,7 @@ class MainActivity : Activity() {
             addView(valueView)
         }
 
-    private fun buildUi(): LinearLayout {
+    private fun buildHomeView(): LinearLayout {
         statusDot = View(this).apply {
             layoutParams = LinearLayout.LayoutParams(dp(12), dp(12))
             background = rounded(0xFF6B7280.toInt(), 6)
@@ -140,41 +210,13 @@ class MainActivity : Activity() {
             textSize = 18f
             setTypeface(typeface, Typeface.BOLD)
             setTextColor(Color.WHITE)
-            background = rounded(blue, 16)
+            background = rounded(accent, 16)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(64)
             )
             stateListAnimator = null
             isAllCaps = false
             setOnClickListener { onConnectClicked() }
-        }
-
-        val settingsBtn = ImageButton(this).apply {
-            // Dùng icon hệ thống (không cần thêm drawable).
-            setImageResource(android.R.drawable.ic_menu_preferences)
-            setBackgroundColor(Color.TRANSPARENT)
-            setColorFilter(textSub)
-            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
-            setOnClickListener {
-                startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
-            }
-        }
-
-        val header = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = dp(24) }
-            addView(TextView(this@MainActivity).apply {
-                text = "VPN Pocket"
-                textSize = 26f
-                setTypeface(typeface, Typeface.BOLD)
-                setTextColor(textMain)
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            })
-            addView(settingsBtn)
         }
 
         val statusRow = LinearLayout(this).apply {
@@ -210,7 +252,16 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(bg)
             setPadding(dp(24), dp(48), dp(24), dp(24))
-            addView(header)
+            addView(TextView(this@MainActivity).apply {
+                text = "VPN Pocket"
+                textSize = 26f
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(textMain)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = dp(24) }
+            })
             addView(card)
             addView(Space(this@MainActivity).apply {
                 layoutParams = LinearLayout.LayoutParams(1, dp(32))
@@ -237,7 +288,7 @@ class MainActivity : Activity() {
                 durationText.text = ""
                 uiHandler.removeCallbacks(tick)
                 connectBtn.text = "KẾT NỐI"
-                connectBtn.background = rounded(blue, 16)
+                connectBtn.background = rounded(accent, 16)
             }
             UiState.CONNECTING -> {
                 statusText.text = "Đang kết nối…"
@@ -286,7 +337,9 @@ class MainActivity : Activity() {
     private fun startVpn() {
         val tm = TunnelManager(this, null)
         if (!tm.hasServeAddr()) {
-            startActivity(Intent(this, QrScanActivity::class.java))
+            // Chưa có server → mở tab Cài đặt để quét QR.
+            selectTab(1)
+            Toast.makeText(this, "Quét mã QR máy chủ trước", Toast.LENGTH_LONG).show()
             return
         }
         startForegroundService(Intent(this, PocketVpnService::class.java).apply {
@@ -309,6 +362,105 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+    // ============ TAB CÀI ĐẶT ============
+
+    private lateinit var settingsServerValue: TextView
+
+    private fun sectionTitle(text: String): TextView = TextView(this).apply {
+        this.text = text
+        textSize = 13f
+        setTypeface(typeface, Typeface.BOLD)
+        setTextColor(accent) // header màu accent như Proton
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(24); bottomMargin = dp(8); leftMargin = dp(4) }
+    }
+
+    private fun settingRow(labelStr: String, valueView: TextView, onClick: (() -> Unit)? = null): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = rounded(cardBg, 14)
+            setPadding(dp(18), dp(16), dp(18), dp(16))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(8) }
+            addView(TextView(this@MainActivity).apply {
+                text = labelStr
+                textSize = 16f
+                setTextColor(textMain)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            addView(valueView)
+            if (onClick != null) {
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { onClick() }
+            }
+        }
+
+    private fun settingValue(text: String): TextView = TextView(this).apply {
+        this.text = text
+        textSize = 14f
+        setTextColor(textSub)
+    }
+
+    private fun buildSettingsView(): LinearLayout {
+        settingsServerValue = settingValue("—")
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(bg)
+            setPadding(dp(24), dp(48), dp(24), dp(24))
+        }
+        root.addView(TextView(this).apply {
+            text = "Cài đặt"
+            textSize = 26f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(textMain)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(8) }
+        })
+        root.addView(sectionTitle("MÁY CHỦ"))
+        root.addView(settingRow("Địa chỉ máy chủ", settingsServerValue, onClick = {
+            startActivity(Intent(this, QrScanActivity::class.java))
+        }))
+        root.addView(sectionTitle("KẾT NỐI"))
+        root.addView(settingRow("Chế độ", settingValue("TCP-only (Mode A)")))
+        root.addView(settingRow("DNS", settingValue("DoH qua tunnel")))
+        root.addView(settingRow("Gọi thoại/game", settingValue("Không hỗ trợ ở Mode A")))
+        root.addView(sectionTitle("ỨNG DỤNG"))
+        val version = try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "—"
+        } catch (_: Exception) { "—" }
+        root.addView(settingRow("Phiên bản", settingValue("VPN Pocket $version")))
+        root.addView(Button(this).apply {
+            text = "Xóa địa chỉ máy chủ"
+            textSize = 15f
+            setTextColor(red)
+            background = rounded(cardBg, 14)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(52)
+            ).apply { topMargin = dp(16) }
+            stateListAnimator = null
+            isAllCaps = false
+            setOnClickListener {
+                TunnelManager(this@MainActivity, null).saveServeAddr("")
+                Toast.makeText(this@MainActivity, "Đã xóa địa chỉ máy chủ", Toast.LENGTH_SHORT).show()
+                refreshSettings()
+            }
+        })
+        return root
+    }
+
+    private fun refreshSettings() {
+        val has = TunnelManager(this, null).hasServeAddr()
+        settingsServerValue.text = if (has) "Đã cấu hình ›" else "Chưa có ›"
     }
 
     private fun requestNotificationPermission() {
