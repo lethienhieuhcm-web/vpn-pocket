@@ -7,9 +7,13 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import android.widget.Toast
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * P2.1: VpnService + TUN (IPv4+IPv6, MTU 1400).
@@ -42,6 +46,9 @@ class PocketVpnService : VpnService() {
     private val running = AtomicBoolean(false)
     private var tunnelManager: TunnelManager? = null
     private var forwarder: TcpForwarder? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    // Chống spam toast: tối đa 1 lần / 60s.
+    private val lastUdpToastAt = AtomicLong(0)
 
     override fun onCreate() {
         super.onCreate()
@@ -114,13 +121,31 @@ class PocketVpnService : VpnService() {
      */
     private fun onTunnelReady(fd: ParcelFileDescriptor) {
         val tm = tunnelManager ?: return
-        // P2.4: DNS → DoH. UDP khác → P2.5 drop (hiện chỉ log).
+        // P2.4: DNS → DoH. P2.5: UDP khác → drop + toast (Mode A không có UDP).
         val dns = DnsHandler(tm) { pkt -> forwarder?.writeTun(pkt) }
         forwarder = TcpForwarder(fd, tm, onUdp = { pkt ->
             if (!dns.handleUdpPacket(pkt)) {
-                Log.d(TAG, "UDP non-DNS dropped (${pkt.size} bytes), TODO P2.5 toast")
+                Log.d(TAG, "UDP non-DNS dropped (${pkt.size} bytes)")
+                notifyUdpDropped()
             }
         }).apply { start() }
+    }
+
+    /**
+     * P2.5: Mode A = TCP-only (VM chặn UDP). Báo user 1 lần / 60s để khỏi spam,
+     * vì app VoIP/game sẽ gửi UDP liên tục.
+     */
+    private fun notifyUdpDropped() {
+        val now = System.currentTimeMillis()
+        if (now - lastUdpToastAt.get() < 60_000) return
+        lastUdpToastAt.set(now)
+        mainHandler.post {
+            Toast.makeText(
+                this,
+                "Chế độ này không hỗ trợ gọi thoại/game (chỉ TCP)",
+                Toast.LENGTH_LONG
+            ).show()
+        }
     }
 
     private fun stopTunnel() {
