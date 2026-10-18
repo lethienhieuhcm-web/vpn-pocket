@@ -31,14 +31,16 @@ object CrashUploader {
             .apply()
     }
 
-    private fun prefs(ctx: Context) =
-        androidx.security.crypto.EncryptedSharedPreferences.create(
-            "vpn_pocket_secure",
-            androidx.security.crypto.MasterKey.Builder(ctx).build(),
+    private fun prefs(ctx: Context): android.content.SharedPreferences {
+        val masterKey = androidx.security.crypto.MasterKey.Builder(ctx).build()
+        return androidx.security.crypto.EncryptedSharedPreferences.create(
             ctx,
+            "vpn_pocket_secure",
+            masterKey,
             androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
+    }
 
     /**
      * Gửi các crash log chưa gửi. Chạy ở background thread.
