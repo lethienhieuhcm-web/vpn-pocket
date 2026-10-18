@@ -32,7 +32,8 @@ object CrashUploader {
                 val p = prefs(ctx)
                 val dir = ctx.filesDir
                 val files = dir.listFiles { f ->
-                    f.name.startsWith("crash-") && f.name.endsWith(".txt") &&
+                    (f.name.startsWith("crash-") || f.name.startsWith("tunnel-")) &&
+                    f.name.endsWith(".txt") &&
                     !p.getBoolean(PREF_SENT_PREFIX + f.name, false)
                 } ?: return@Thread
                 for (f in files) {

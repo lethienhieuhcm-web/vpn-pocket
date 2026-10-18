@@ -163,6 +163,12 @@ class PocketVpnService : VpnService() {
             tm.connect()
         } catch (e: Exception) {
             Log.e(TAG, "tunnel connect failed: ${e.message}")
+            // Lưu log lỗi tunnel để tự upload — em tự đọc log, không đoán bịa.
+            try {
+                val ts = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+                val logFile = java.io.File(filesDir, "tunnel-$ts.txt")
+                logFile.writeText("Tunnel connect failed at $ts\n\n${e.message}\n\n${Log.getStackTraceString(e)}")
+            } catch (ignored: Exception) { }
             broadcast(ACTION_TUNNEL_DOWN, reason = "Không nối được tunnel: ${e.message}")
             updateNotification("Không kết nối được")
             stopForeground(STOP_FOREGROUND_REMOVE)
