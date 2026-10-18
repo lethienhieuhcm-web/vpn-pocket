@@ -86,6 +86,7 @@ class PocketVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        CrashHandler.init(this)
         createNotificationChannel()
     }
 

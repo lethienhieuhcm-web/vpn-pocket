@@ -82,6 +82,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashHandler.init(this)
         homeView = buildHomeView()
         serversView = buildServersView()
         serversView.visibility = View.GONE
@@ -786,6 +787,26 @@ class MainActivity : Activity() {
             packageManager.getPackageInfo(packageName, 0).versionName ?: "—"
         } catch (_: Exception) { "—" }
         root.addView(settingRow("Phiên bản", settingValue("VPN Pocket $version")))
+        // Xem log crash gần nhất (debug).
+        root.addView(settingRow("Nhật ký lỗi", settingValue(
+            CrashHandler.latestCrash(this)?.name ?: "Chưa có"
+        ), onClick = {
+            val log = CrashHandler.readCrash(this)
+            if (log != null) {
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("Nhật ký lỗi")
+                    .setMessage(log.take(4000))
+                    .setPositiveButton("Đóng", null)
+                    .setNeutralButton("Copy") { _, _ ->
+                        val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("crash", log))
+                        Toast.makeText(this, "Đã copy", Toast.LENGTH_SHORT).show()
+                    }
+                    .show()
+            } else {
+                Toast.makeText(this, "Chưa có log lỗi", Toast.LENGTH_SHORT).show()
+            }
+        }))
         root.addView(Button(this).apply {
             text = "Xóa địa chỉ máy chủ"
             textSize = 15f
