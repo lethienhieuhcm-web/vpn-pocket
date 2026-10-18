@@ -832,6 +832,11 @@ class MainActivity : Activity() {
                         refreshSettings()
                     }
                 }
+                .setNeutralButton("Quét QR") { _, _ ->
+                    startActivity(Intent(this, QrScanActivity::class.java).apply {
+                        putExtra(QrScanActivity.EXTRA_MODE, QrScanActivity.MODE_CRASH)
+                    })
+                }
                 .setNegativeButton("Hủy", null)
                 .show()
         }))
