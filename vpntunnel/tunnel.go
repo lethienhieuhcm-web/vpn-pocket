@@ -29,8 +29,33 @@ import (
 	"time"
 
 	"github.com/tailscale/tailcat"
+	"tailscale.com/net/netmon"
 	"tailscale.com/types/key"
 )
+
+func init() {
+	// Android SDK 30+ chặn Go net.Interfaces() (permission denied).
+	// Học theo tailscale-android (libtailscale/tailscale.go):
+	// đăng ký InterfaceGetter tĩnh để netmon.New() không fail.
+	// Network change thật vẫn do Kotlin NetworkMonitor.kt báo qua OnNetworkChanged().
+	// Chỉ cần loopback — magicsock chỉ cần NetMon non-nil để khởi tạo.
+	netmon.RegisterInterfaceGetter(func() ([]netmon.Interface, error) {
+		lo := &net.Interface{
+			Index: 1,
+			MTU:   65536,
+			Name:  "lo",
+			Flags: net.FlagUp | net.FlagLoopback,
+		}
+		return []netmon.Interface{
+			{
+				Interface: lo,
+				AltAddrs: []net.Addr{
+					&net.IPNet{IP: net.ParseIP("127.0.0.1"), Mask: net.CIDRMask(8, 32)},
+				},
+			},
+		}, nil
+	})
+}
 
 // dialTimeout bounds tunnel dial + CONNECT handshake.
 const dialTimeout = 30 * time.Second

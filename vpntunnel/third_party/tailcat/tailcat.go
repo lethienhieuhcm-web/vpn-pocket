@@ -630,11 +630,10 @@ func (s *Server) startLocked(ctx context.Context) error {
 		logf(format, args...)
 	})
 	if err != nil {
-		// Android apps lack netlink permission (netlinkrib: permission denied).
-		// Follow tailscale-android (libtailscale/backend.go): log and continue
-		// with nil — wgengine handles nil NetMon. Network changes are reported
-		// by Kotlin (NetworkMonitor) via OnNetworkChanged instead.
-		// (vpn-pocket fix, 2026-10-18)
+		// Với RegisterInterfaceGetter đã đăng ký ở tunnel.go init(),
+		// netmon.New() sẽ thành công trên Android. Giữ fallback để không crash
+		// nếu có lỗi không ngờ — nhưng NetMon=nil sẽ làm magicsock fail.
+		// (vpn-pocket fix, 2026-10-18, cập nhật 2026-10-18)
 		logf("netmon.New failed, continuing without network monitor: %v", err)
 		netMon = nil
 	}
@@ -1924,11 +1923,10 @@ func (c *Client) initLocked() error {
 		logf(format, args...)
 	})
 	if err != nil {
-		// Android apps lack netlink permission (netlinkrib: permission denied).
-		// Follow tailscale-android (libtailscale/backend.go): log and continue
-		// with nil — wgengine handles nil NetMon. Network changes are reported
-		// by Kotlin (NetworkMonitor) via OnNetworkChanged instead.
-		// (vpn-pocket fix, 2026-10-18)
+		// Với RegisterInterfaceGetter đã đăng ký ở tunnel.go init(),
+		// netmon.New() sẽ thành công trên Android. Giữ fallback để không crash
+		// nếu có lỗi không ngờ — nhưng NetMon=nil sẽ làm magicsock fail.
+		// (vpn-pocket fix, 2026-10-18, cập nhật 2026-10-18)
 		logf("netmon.New failed, continuing without network monitor: %v", err)
 		netMon = nil
 	}
@@ -2110,14 +2108,7 @@ func (c *Client) ping(ctx context.Context) (PingResult, error) {
 
 	var zero PingResult
 	t0 := time.Now()
-	// Debug 2026-10-18: xác định nil nào gây panic (vpn-apk-44 báo nil pointer ở connect).
-	if c.lb == nil {
-		return zero, errors.New("vpntunnel: debug: c.lb is nil")
-	}
 	mc := c.lb.sys.MagicSock.Get()
-	if mc == nil {
-		return zero, errors.New("vpntunnel: debug: MagicSock.Get() returned nil (NetMon=nil?)")
-	}
 
 	dstNode := c.ci.ServerPublic.NodePublic
 	derpRegion := c.lb.derpRegionID()
