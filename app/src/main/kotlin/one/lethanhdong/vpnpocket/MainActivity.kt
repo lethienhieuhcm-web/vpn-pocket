@@ -603,7 +603,7 @@ class MainActivity : Activity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { bottomMargin = dp(16) }
         })
-        root.addView(sectionHeader("Khả dụng"))
+        root.addView(sectionTitle("KHẢ DỤNG"))
         root.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -635,7 +635,7 @@ class MainActivity : Activity() {
                 background = rounded(0xFF4CAF50.toInt(), 6)
             })
         })
-        root.addView(sectionHeader("Sắp có"))
+        root.addView(sectionTitle("SẮP CÓ"))
         root.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -671,7 +671,7 @@ class MainActivity : Activity() {
     }
 
     private fun refreshServers() {
-        val serveAddr = prefs.getString("serve_addr", null)
+        val serveAddr: String? = TunnelManager(this, null).getServeAddr()
         if (serveAddr != null) {
             serverStatusText.text = "Đã cấu hình • TCP"
             Thread {
