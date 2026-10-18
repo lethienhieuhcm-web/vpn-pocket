@@ -140,6 +140,16 @@ class PocketVpnService : VpnService() {
         updateNotification("Đang kiểm tra máy chủ…")
         val tm = TunnelManager(this, this)
         tunnelManager = tm
+        // Level 2: Kotlin owns network monitoring (tailscale-android pattern).
+        // Go's netmon is disabled (nil); network changes come via this callback.
+        NetworkMonitor.start(this) { available ->
+            Log.i(TAG, "network changed: available=$available")
+            tm.onNetworkChanged(available)
+            if (!available) {
+                broadcast(ACTION_TUNNEL_RECONNECTING)
+                updateNotification("Mất mạng, đang chờ…")
+            }
+        }
         if (!tm.hasServeAddr()) {
             Log.e(TAG, "no serve address")
             broadcast(ACTION_TUNNEL_DOWN, reason = "Chưa quét mã QR máy chủ")
@@ -237,6 +247,7 @@ class PocketVpnService : VpnService() {
 
     private fun stopTunnel() {
         if (!running.compareAndSet(true, false)) return
+        NetworkMonitor.stop(this)
         mainHandler.removeCallbacks(watchdog)
         forwarder?.stop()
         forwarder = null

@@ -117,4 +117,18 @@ class TunnelManager(
         }
         tunnel = null
     }
+
+    /**
+     * Called by NetworkMonitor when Android network state changes.
+     * Forwards to the Go tunnel so it can track availability.
+     * (Level 2: Kotlin owns network monitoring, Go receives callbacks —
+     *  follows tailscale-android/sing-box Platform Interface pattern.)
+     */
+    fun onNetworkChanged(available: Boolean) {
+        try {
+            tunnel?.onNetworkChanged(available)
+        } catch (e: Exception) {
+            Log.w(TAG, "onNetworkChanged: ${e.message}")
+        }
+    }
 }

@@ -631,11 +631,12 @@ func (s *Server) startLocked(ctx context.Context) error {
 	})
 	if err != nil {
 		// Android apps lack netlink permission (netlinkrib: permission denied).
-		// Fall back to a static snapshot: enough for a simple DERP-only client
-		// that doesn't need live network-change monitoring.
-		// (vpn-pocket fork fix, 2026-10-17)
-		logf("netmon.New failed, using static monitor: %v", err)
-		netMon = netmon.NewStatic()
+		// Follow tailscale-android (libtailscale/backend.go): log and continue
+		// with nil — wgengine handles nil NetMon. Network changes are reported
+		// by Kotlin (NetworkMonitor) via OnNetworkChanged instead.
+		// (vpn-pocket fix, 2026-10-18)
+		logf("netmon.New failed, continuing without network monitor: %v", err)
+		netMon = nil
 	}
 	sys.Set(netMon)
 
@@ -1662,7 +1663,12 @@ func (lb *locoBackend) Start() error {
 	if err := e.Reconfig(wgConf, routerConf, dnsConf); err != nil {
 		return fmt.Errorf("e.Reconfig: %w", err)
 	}
-	lb.sys.NetMon.Get().Start()
+	// NetMon may be nil on Android (no netlink permission); wgengine handles
+	// nil, but Start() on nil would panic. Kotlin reports network changes via
+	// OnNetworkChanged instead. (vpn-pocket fix, 2026-10-18)
+	if mon := lb.sys.NetMon.Get(); mon != nil {
+		mon.Start()
+	}
 
 	return nil
 }
@@ -1919,11 +1925,12 @@ func (c *Client) initLocked() error {
 	})
 	if err != nil {
 		// Android apps lack netlink permission (netlinkrib: permission denied).
-		// Fall back to a static snapshot: enough for a simple DERP-only client
-		// that doesn't need live network-change monitoring.
-		// (vpn-pocket fork fix, 2026-10-17)
-		logf("netmon.New failed, using static monitor: %v", err)
-		netMon = netmon.NewStatic()
+		// Follow tailscale-android (libtailscale/backend.go): log and continue
+		// with nil — wgengine handles nil NetMon. Network changes are reported
+		// by Kotlin (NetworkMonitor) via OnNetworkChanged instead.
+		// (vpn-pocket fix, 2026-10-18)
+		logf("netmon.New failed, continuing without network monitor: %v", err)
+		netMon = nil
 	}
 	sys.Set(netMon)
 

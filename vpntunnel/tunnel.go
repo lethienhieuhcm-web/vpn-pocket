@@ -62,6 +62,9 @@ type Tunnel struct {
 	protector Protector
 	protected map[int64]bool // inodes already protect()ed
 	closed    bool
+	// networkAvailable tracks the last network state reported by Kotlin
+	// (NetworkMonitor). Used to avoid redundant reconnect attempts.
+	networkAvailable bool
 }
 
 // NewTunnel creates a tunnel.
@@ -85,8 +88,9 @@ func NewTunnel(serveAddr, keyStr string, p Protector) (*Tunnel, error) {
 			Key:    priv,
 			Logf:   func(string, ...any) {},
 		},
-		protector: p,
-		protected: map[int64]bool{},
+		protector:        p,
+		protected:        map[int64]bool{},
+		networkAvailable: true, // assume available until NetworkMonitor says otherwise
 	}
 	return t, nil
 }
@@ -331,6 +335,31 @@ func (t *Tunnel) Close() (err error) {
 	}
 	t.closed = true
 	return t.client.Close()
+}
+
+// OnNetworkChanged is called by Kotlin (NetworkMonitor) when the Android
+// network state changes. This replaces Go's netmon on Android: instead of
+// tailcat monitoring the network itself (which needs netlink permission),
+// Kotlin monitors via ConnectivityManager and reports here.
+//
+// available=false: the uplink is gone; the caller (PocketVpnService) should
+//   stop the tunnel and show RECONNECTING.
+// available=true: a usable network is back; the caller may call Connect()
+//   again to re-establish the tunnel.
+//
+// This method only records the state; it does not block or dial.
+func (t *Tunnel) OnNetworkChanged(available bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.networkAvailable = available
+}
+
+// NetworkAvailable returns the last network state reported via
+// OnNetworkChanged. Defaults to true (assume available until told otherwise).
+func (t *Tunnel) NetworkAvailable() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.networkAvailable
 }
 
 // Conn is a gomobile-compatible TCP connection through the tunnel.
