@@ -808,37 +808,9 @@ class MainActivity : Activity() {
                 Toast.makeText(this, "Chưa có log lỗi", Toast.LENGTH_SHORT).show()
             }
         }))
-        // Cấu hình tự gửi log crash qua Telegram.
-        root.addView(settingRow("Tự gửi log lỗi", settingValue(
-            if (CrashUploader.isConfigured(this)) "Đã bật" else "Chưa cấu hình"
-        ), onClick = {
-            val tokenInput = android.widget.EditText(this).apply { hint = "Bot token" }
-            val chatInput = android.widget.EditText(this).apply { hint = "Chat ID" }
-            val layout = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(20), dp(10), dp(20), dp(10))
-                addView(tokenInput)
-                addView(chatInput)
-            }
-            android.app.AlertDialog.Builder(this)
-                .setTitle("Cấu hình gửi log")
-                .setView(layout)
-                .setPositiveButton("Lưu") { _, _ ->
-                    val t = tokenInput.text.toString().trim()
-                    val c = chatInput.text.toString().trim()
-                    if (t.isNotEmpty() && c.isNotEmpty()) {
-                        CrashUploader.saveConfig(this, t, c)
-                        Toast.makeText(this, "Đã bật tự gửi log", Toast.LENGTH_SHORT).show()
-                        refreshSettings()
-                    }
-                }
-                .setNeutralButton("Quét QR") { _, _ ->
-                    startActivity(Intent(this, QrScanActivity::class.java).apply {
-                        putExtra(QrScanActivity.EXTRA_MODE, QrScanActivity.MODE_CRASH)
-                    })
-                }
-                .setNegativeButton("Hủy", null)
-                .show()
+        // Tự gửi log crash: tự động, không cần cấu hình.
+        root.addView(settingRow("Tự gửi log lỗi", settingValue("Tự động"), onClick = {
+            Toast.makeText(this, "Log crash tự gửi khi mở app", Toast.LENGTH_SHORT).show()
         }))
         root.addView(Button(this).apply {
             text = "Xóa địa chỉ máy chủ"
