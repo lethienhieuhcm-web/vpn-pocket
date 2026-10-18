@@ -190,19 +190,19 @@ class QrScanActivity : ComponentActivity() {
     private fun onQrScanned(text: String) {        runOnUiThread {
             val mode = intent.getStringExtra(EXTRA_MODE) ?: MODE_SERVER
             if (mode == MODE_CRASH) {
-                // Format: vpncrash:<bot_token>:<chat_id>
+                // Format: vpncrash:<github_pat_token>
                 if (!text.startsWith("vpncrash:")) {
                     Toast.makeText(this, "Mã không đúng (cần mã QR cấu hình log)", Toast.LENGTH_LONG).show()
                     scanned = false
                     return@runOnUiThread
                 }
-                val parts = text.removePrefix("vpncrash:").split(":", limit = 2)
-                if (parts.size != 2 || parts[0].isBlank() || parts[1].isBlank()) {
-                    Toast.makeText(this, "Mã QR thiếu thông tin", Toast.LENGTH_LONG).show()
+                val token = text.removePrefix("vpncrash:").trim()
+                if (token.isBlank()) {
+                    Toast.makeText(this, "Mã QR thiếu token", Toast.LENGTH_LONG).show()
                     scanned = false
                     return@runOnUiThread
                 }
-                CrashUploader.saveConfig(this, parts[0], parts[1])
+                CrashUploader.saveConfig(this, token)
                 Toast.makeText(this, "Đã bật tự gửi log lỗi", Toast.LENGTH_SHORT).show()
                 finish()
                 return@runOnUiThread
