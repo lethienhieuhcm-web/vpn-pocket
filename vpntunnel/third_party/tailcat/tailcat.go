@@ -2110,7 +2110,14 @@ func (c *Client) ping(ctx context.Context) (PingResult, error) {
 
 	var zero PingResult
 	t0 := time.Now()
+	// Debug 2026-10-18: xác định nil nào gây panic (vpn-apk-44 báo nil pointer ở connect).
+	if c.lb == nil {
+		return zero, errors.New("vpntunnel: debug: c.lb is nil")
+	}
 	mc := c.lb.sys.MagicSock.Get()
+	if mc == nil {
+		return zero, errors.New("vpntunnel: debug: MagicSock.Get() returned nil (NetMon=nil?)")
+	}
 
 	dstNode := c.ci.ServerPublic.NodePublic
 	derpRegion := c.lb.derpRegionID()
