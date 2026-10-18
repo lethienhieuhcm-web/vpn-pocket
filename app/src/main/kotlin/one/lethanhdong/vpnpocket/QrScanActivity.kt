@@ -188,25 +188,6 @@ class QrScanActivity : ComponentActivity() {
     }
 
     private fun onQrScanned(text: String) {        runOnUiThread {
-            val mode = intent.getStringExtra(EXTRA_MODE) ?: MODE_SERVER
-            if (mode == MODE_CRASH) {
-                // Format: vpncrash:<github_pat_token>
-                if (!text.startsWith("vpncrash:")) {
-                    Toast.makeText(this, "Mã không đúng (cần mã QR cấu hình log)", Toast.LENGTH_LONG).show()
-                    scanned = false
-                    return@runOnUiThread
-                }
-                val token = text.removePrefix("vpncrash:").trim()
-                if (token.isBlank()) {
-                    Toast.makeText(this, "Mã QR thiếu token", Toast.LENGTH_LONG).show()
-                    scanned = false
-                    return@runOnUiThread
-                }
-                CrashUploader.saveConfig(this, token)
-                Toast.makeText(this, "Đã bật tự gửi log lỗi", Toast.LENGTH_SHORT).show()
-                finish()
-                return@runOnUiThread
-            }
             // Validate: phải là tailcat serve address (khớp regex của qr_serve.py).
             if (!text.matches(Regex("tcp[A-Za-z0-9_.\\-]+"))) {
                 Toast.makeText(this, "Mã không đúng (cần mã QR serve address)", Toast.LENGTH_LONG).show()
