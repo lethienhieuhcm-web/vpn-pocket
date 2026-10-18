@@ -32,7 +32,9 @@ object CrashUploader {
     }
 
     private fun prefs(ctx: Context): android.content.SharedPreferences {
-        val masterKey = androidx.security.crypto.MasterKey.Builder(ctx).build()
+        val masterKey = androidx.security.crypto.MasterKey.Builder(ctx)
+            .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
+            .build()
         return androidx.security.crypto.EncryptedSharedPreferences.create(
             ctx,
             "vpn_pocket_secure",
