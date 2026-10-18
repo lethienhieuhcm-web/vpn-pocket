@@ -97,7 +97,18 @@ func NewTunnel(serveAddr, keyStr string, p Protector) (*Tunnel, error) {
 // The network handshake runs WITHOUT holding the mutex, so a concurrent
 // ProtectScan from the 30s watchdog is not blocked for the whole dial
 // timeout (fix 2026-10-17: Connect held the lock across Ping).
-func (t *Tunnel) Connect() error {
+// recoverPanic converts a Go panic into an error, preventing a native crash
+// from killing the Android app. This mirrors ProtonVPN's architecture where
+// the native layer (Rust via UniFFI) never crashes the app — errors become
+// states, not crashes. All public Tunnel methods must use this.
+func recoverPanic(err *error, op string) {
+	if r := recover(); r != nil {
+		*err = fmt.Errorf("vpntunnel: %s panic: %v", op, r)
+	}
+}
+
+func (t *Tunnel) Connect() (err error) {
+	defer recoverPanic(&err, "connect")
 	t.mu.Lock()
 	if t.closed {
 		t.mu.Unlock()
@@ -165,7 +176,8 @@ func (t *Tunnel) dialProxyConn(ctx context.Context, host string, port int) (net.
 
 // DialTCP opens a TCP stream through the tunnel to host:port (Mode A).
 // It dials the VM proxy port through the tunnel and issues HTTP CONNECT.
-func (t *Tunnel) DialTCP(host string, port int) (*Conn, error) {
+func (t *Tunnel) DialTCP(host string, port int) (conn *Conn, err error) {
+	defer recoverPanic(&err, "dial")
 	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
 	defer cancel()
 	raw, err := t.dialProxyConn(ctx, host, port)
@@ -179,7 +191,8 @@ func (t *Tunnel) DialTCP(host string, port int) (*Conn, error) {
 // ResolveDoH sends a raw DNS query via DNS-over-HTTPS (dns.google)
 // through the tunnel and returns the raw DNS response.
 // Mode A has no UDP, so DNS goes over TCP/TLS inside the tunnel.
-func (t *Tunnel) ResolveDoH(query []byte) ([]byte, error) {
+func (t *Tunnel) ResolveDoH(query []byte) (out []byte, err error) {
+	defer recoverPanic(&err, "doh")
 	if len(query) < 12 {
 		return nil, errors.New("vpntunnel: DNS query too short")
 	}
@@ -234,7 +247,8 @@ func (t *Tunnel) ResolveDoH(query []byte) ([]byte, error) {
 // The Android UI must only show "connected" when this succeeds — a direct
 // HTTPS fetch would return the real IP even when the VPN is broken (bug 2026-10-17:
 // UI showed "Đã kết nối" with the carrier CGNAT IP while browser bypassed the VPN).
-func (t *Tunnel) FetchEgressIp() (string, error) {
+func (t *Tunnel) FetchEgressIp() (ip string, err error) {
+	defer recoverPanic(&err, "egressip")
 	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
 	defer cancel()
 
@@ -270,11 +284,11 @@ func (t *Tunnel) FetchEgressIp() (string, error) {
 	if resp.StatusCode != 200 {
 		return "", fmt.Errorf("vpntunnel: egress IP status %s", resp.Status)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 64))
-	if err != nil {
-		return "", fmt.Errorf("vpntunnel: egress IP read: %w", err)
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 64))
+	if readErr != nil {
+		return "", fmt.Errorf("vpntunnel: egress IP read: %w", readErr)
 	}
-	ip := strings.TrimSpace(string(body))
+	ip = strings.TrimSpace(string(body))
 	if ip == "" || len(ip) > 45 {
 		return "", errors.New("vpntunnel: egress IP invalid response")
 	}
@@ -308,7 +322,8 @@ func (t *Tunnel) protectScanLocked() int {
 }
 
 // Close shuts the tunnel down.
-func (t *Tunnel) Close() error {
+func (t *Tunnel) Close() (err error) {
+	defer recoverPanic(&err, "close")
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.closed {
